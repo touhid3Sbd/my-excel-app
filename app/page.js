@@ -1,11 +1,11 @@
-// app/page.js → YOUR DESIGN + SEARCH 100% FIXED
+// app/page.js → FINAL VERSION – ALL DATA SHOWS CORRECTLY
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function Home() {
   const [data, setData] = useState([]);
-  const [originalData, setOriginalData] = useState([]);   // ← ADDED: Keeps original data for search
+  const [originalData, setOriginalData] = useState([]);
   const [columns, setColumns] = useState([]);
   const [search, setSearch] = useState('');
   const [file, setFile] = useState(null);
@@ -14,48 +14,47 @@ export default function Home() {
   const [editForm, setEditForm] = useState({});
   const [showAdd, setShowAdd] = useState(false);
   const [newRow, setNewRow] = useState({});
-
-  // CHANGE THIS NUMBER TO CONTROL ROWS PER PAGE
   const [page, setPage] = useState(1);
-  const perPage = 10;
+  const perPage = 15;
+  const fileInputRef = useRef(null);
+
   const totalPages = Math.ceil(data.length / perPage);
   const paginated = data.slice((page - 1) * perPage, page * perPage);
 
-  // ← FIXED: load() now saves data to both states
   async function load() {
     const res = await fetch('/api/people');
     const result = await res.json();
     setData(result);
-    setOriginalData(result);        // ← This line was missing
+    setOriginalData(result);
     setPage(1);
 
     if (result.length > 0) {
-      const keys = Object.keys(result[0]).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k));
+      const ignored = ['__v', 'createdAt', 'updatedAt', '_id', 'id'];
+      const keys = Object.keys(result[0]).filter(k => !ignored.includes(k));
+
       setColumns(keys);
+
+      // Create empty form for Add Row
       const empty = {};
       keys.forEach(k => empty[k] = '');
       setNewRow(empty);
     }
   }
 
-  // ← FIXED: First useEffect (on mount)
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
-  // ← FULLY FIXED SEARCH (uses originalData)
   useEffect(() => {
     if (!search.trim()) {
       setData(originalData);
       setPage(1);
       return;
     }
-
     const term = search.toLowerCase();
     const filtered = originalData.filter(row =>
-      columns.some(col => 
-        row[col] != null && String(row[col]).toLowerCase().includes(term)
-      )
+      columns.some(col => {
+        const value = row[col];
+        return value != null && String(value).toLowerCase().includes(term);
+      })
     );
     setData(filtered);
     setPage(1);
@@ -68,111 +67,149 @@ export default function Home() {
     fd.append('file', file);
     const res = await fetch('/api/upload', { method: 'POST', body: fd });
     if (res.ok) {
+      const json = await res.json();
       setUploadStatus('success');
+      alert(`Success! Added: ${json.added}, Skipped: ${json.skipped}`);
       setFile(null);
       load();
-    } else setUploadStatus('error');
-    setTimeout(() => setUploadStatus(''), 4000);
+    } else {
+      setUploadStatus('error');
+      alert('Upload failed');
+    }
+    setTimeout(() => setUploadStatus(''), 5000);
   }
 
-  async function addRow() { 
-    await fetch('/api/people', { 
-      method: 'POST', 
-      body: JSON.stringify(newRow), 
-      headers: { 'Content-Type': 'application/json' } 
-    }); 
-    setShowAdd(false); 
-    load(); 
+  const downloadTemplate = async () => {
+    const res = await fetch('/api/template');
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'excel-template.xlsx';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    }
+  };
+
+  async function addRow() {
+    await fetch('/api/people', { method: 'POST', body: JSON.stringify(newRow), headers: { 'Content-Type': 'application/json' } });
+    setShowAdd(false);
+    load();
   }
 
-  async function saveEdit() { 
-    await fetch(`/api/people/${editing._id}`, { 
-      method: 'PUT', 
-      body: JSON.stringify(editForm), 
-      headers: { 'Content-Type': 'application/json' } 
-    }); 
-    setEditing(null); 
-    load(); 
+  async function saveEdit() {
+    await fetch(`/api/people/${editing._id}`, { method: 'PUT', body: JSON.stringify(editForm), headers: { 'Content-Type': 'application/json' } });
+    setEditing(null);
+    load();
   }
 
-  async function remove(id) { 
-    if (confirm('Delete this row?')) 
-      await fetch(`/api/people/${id}`, { method: 'DELETE' }); 
-    load(); 
+  async function remove(id) {
+    if (confirm('Delete this row?')) {
+      await fetch(`/api/people/${id}`, { method: 'DELETE' });
+      load();
+    }
   }
 
   return (
-    <div className="min-h-screen bg-pink-50 py-12 px-6">
+    <div className="min-h-screen bg-gray-50 py-12 px-6">
       <div className="max-w-7xl mx-auto">
 
         {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-800 mb-2">Excel Data Manager</h1>
-          
+          <p className="text-gray-600">Upload, view, edit & manage your data</p>
         </div>
 
         {/* Upload Section */}
-        <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-xl p-8 mb-10 border border-white/50">
-          <div className="flex flex-wrap items-center gap-6">
-            <input type="file" accept=".xlsx,.xls" onChange={e => setFile(e.target.files?.[0] || null)}
-              className="text-lg border rounded-lg px-4 py-2" />
-            <button onClick={uploadFile} disabled={uploadStatus === 'uploading'}
-              className="bg-sky-500/75 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold">
+        <div className="bg-white rounded-2xl shadow-xl p-10 mb-10 border border-gray-200">
+          <h2 className="text-2xl font-bold text-center text-gray-800 mb-8">Upload Excel File</h2>
+
+          <div
+            className="border-4 border-dashed border-green-300 rounded-2xl p-12 text-center cursor-pointer hover:border-green-500 hover:bg-green-50 transition-all"
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); setFile(e.dataTransfer.files[0]); }}
+          >
+            <svg className="mx-auto h-20 w-20 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 48 48">
+              <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-8-8m0 0l-8 8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <p className="mt-4 text-xl font-semibold text-gray-700">Drop file here or click to browse</p>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
+          </div>
+
+          {file && (
+            <div className="mt-8 bg-green-50 border-2 border-green-200 rounded-xl px-6 py-5 flex items-center gap-4">
+              <svg className="w-10 h-10 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M3 4a2 2 0 012-2h10a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V4zm2 1v10h10V5H5z" clipRule="evenodd"/>
+              </svg>
+              <span className="text-lg font-bold text-blue-700">{file.name}</span>
+              <button onClick={() => setFile(null)} className="ml-auto text-green-700 hover:text-green-900 font-semibold">Remove</button>
+            </div>
+          )}
+
+          <div className="mt-10 flex justify-center gap-8">
+            <button onClick={downloadTemplate} className="bg-green-600 hover:bg-green-700 text-white px-10 py-5 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105">
+              Download Template
+            </button>
+            <button
+              onClick={uploadFile}
+              disabled={!file || uploadStatus === 'uploading'}
+              className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:opacity-50 text-white px-12 py-5 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105"
+            >
               {uploadStatus === 'uploading' ? 'Uploading...' : 'Upload Excel'}
             </button>
           </div>
-          {uploadStatus === 'success' && <p className="mt-4 text-green-600 font-medium">Uploaded successfully!</p>}
-          {uploadStatus === 'error' && <p className="mt-4 text-red-600 font-medium">Upload failed. Try again.</p>}
+
+          {uploadStatus === 'success' && <p className="mt-6 text-green-600 text-center text-2xl font-bold">Upload Successful!</p>}
+          {uploadStatus === 'error' && <p className="mt-6 text-red-600 text-center text-2xl font-bold">Upload Failed!</p>}
         </div>
 
         {/* Controls */}
         <div className="flex flex-wrap gap-6 mb-8">
-          <button onClick={() => setShowAdd(true)}
-            className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold">
+          <button onClick={() => setShowAdd(true)} className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold">
             + Add New Row
           </button>
-          <input 
-            placeholder="Search in all columns..." 
-            value={search} 
+          <input
+            placeholder="Search all columns..."
+            value={search}
             onChange={e => setSearch(e.target.value)}
-            className="flex-1 min-w-64 px-6 py-3 border rounded-lg text-lg focus:outline-none focus:border-blue-500"
+            className="flex-1 min-w-64 px-6 py-3 border-2 border-gray-300 rounded-lg text-lg focus:border-green-500 focus:outline-none"
           />
         </div>
 
-        {/* Records Info */}
-        <div className="mb-6 text-gray-700">
-          Showing {(page-1)*perPage + 1}–{Math.min(page*perPage, data.length)} of {data.length} records
+        <div className="mb-6 text-gray-700 font-medium">
+          Total Records: <span className="text-green-700 font-bold">{data.length}</span> | 
+          Showing {(page-1)*perPage + 1}–{Math.min(page*perPage, data.length)}
         </div>
 
         {/* Table */}
-        <div className="bg-gray-100 backdrop-blur-md rounded-xl shadow-2xl overflow-hidden border border-white/60">
+        <div className="bg-white rounded-xl shadow-2xl overflow-hidden border">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-100 border-b">
+              <thead className="bg-green-100">
                 <tr>
                   {columns.map(col => (
                     <th key={col} className="px-6 py-4 text-left font-semibold text-gray-700 capitalize">
-                      {col}
+                      {col.replace(/([A-Z])/g, ' $1').trim()}
                     </th>
                   ))}
                   <th className="px-6 py-4 text-center font-semibold text-gray-700">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {paginated.map(row => (
-                  <tr key={row._id} className="border-b hover:bg-gray-50 transition">
+                {paginated.map((row, i) => (
+                  <tr key={row._id || i} className="border-t hover:bg-green-50 transition">
                     {columns.map(col => (
                       <td key={col} className="px-6 py-4 text-gray-800">
-                        {row[col] !== null && row[col] !== undefined ? String(row[col]) : '-'}
+                        {row[col] != null ? String(row[col]) : '-'}
                       </td>
                     ))}
                     <td className="px-6 py-4 text-center space-x-3">
-                      <button onClick={() => { setEditing(row); setEditForm({...row}); }}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded font-medium">
+                      <button onClick={() => { setEditing(row); setEditForm({...row}); }} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded font-medium">
                         Edit
                       </button>
-                      <button onClick={() => remove(row._id)}
-                        className="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded font-medium">
+                      <button onClick={() => remove(row._id)} className="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded font-medium">
                         Delete
                       </button>
                     </td>
@@ -185,58 +222,47 @@ export default function Home() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex justify-center items-center gap-3 mt-10">
-            <button onClick={() => setPage(p => Math.max(1, p-1))}
-              className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded font-medium disabled:opacity-50"
-              disabled={page === 1}>
+          <div className="flex justify-center gap-3 mt-10">
+            <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded font-medium disabled:opacity-50">
               Previous
             </button>
-            <div className="flex gap-2">
-              {[...Array(totalPages)].map((_, i) => (
-                <button key={i+1} onClick={() => setPage(i+1)}
-                  className={`w-10 h-10 rounded font-medium ${page === i+1 ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}>
-                  {i+1}
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setPage(p => Math.min(totalPages, p+1))}
-              className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded font-medium disabled:opacity-50"
-              disabled={page === totalPages}>
+            {[...Array(totalPages)].map((_, i) => (
+              <button key={i+1} onClick={() => setPage(i+1)} className={`w-10 h-10 rounded font-medium ${page === i+1 ? 'bg-green-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}>
+                {i+1}
+              </button>
+            ))}
+            <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded font-medium disabled:opacity-50">
               Next
             </button>
           </div>
         )}
 
-        {/* Add / Edit Modal */}
+        {/* Add/Edit Modal */}
         {(showAdd || editing) && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-6">
-            <div className="bg-white rounded-lg shadow-xl p-10 max-w-4xl w-full max-h-screen overflow-y-auto">
-              <h2 className="text-3xl font-bold mb-8 text-gray-800 text-center">
+            <div className="bg-white rounded-2xl shadow-2xl p-10 max-w-4xl w-full max-h-screen overflow-y-auto">
+              <h2 className="text-3xl font-bold mb-8 text-center text-green-700">
                 {showAdd ? 'Add New Row' : 'Edit Row'}
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {columns.map(col => (
                   <div key={col}>
-                    <label className="block font-medium text-gray-700 capitalize mb-2">{col}</label>
+                    <label className="block font-medium text-gray-700 capitalize mb-2">
+                      {col.replace(/([A-Z])/g, ' $1').trim()}
+                    </label>
                     <input
                       value={(showAdd ? newRow : editForm)[col] || ''}
-                      onChange={e => showAdd 
-                        ? setNewRow({...newRow, [col]: e.target.value})
-                        : setEditForm({...editForm, [col]: e.target.value})
-                      }
-                      className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-blue-500"
-                      placeholder={`Enter ${col}`}
+                      onChange={e => showAdd ? setNewRow({...newRow, [col]: e.target.value}) : setEditForm({...editForm, [col]: e.target.value})}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
                     />
                   </div>
                 ))}
               </div>
               <div className="flex gap-6 mt-10">
-                <button onClick={showAdd ? addRow : saveEdit}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-lg font-bold text-lg">
+                <button onClick={showAdd ? addRow : saveEdit} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-4 rounded-lg font-bold text-lg">
                   {showAdd ? 'Add Row' : 'Save Changes'}
                 </button>
-                <button onClick={() => { setShowAdd(false); setEditing(null); }}
-                  className="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-4 rounded-lg font-bold text-lg">
+                <button onClick={() => { setShowAdd(false); setEditing(null); }} className="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-4 rounded-lg font-bold text-lg">
                   Cancel
                 </button>
               </div>
