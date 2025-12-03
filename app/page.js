@@ -1,4 +1,4 @@
-// app/page.js → FINAL VERSION – ALL DATA SHOWS CORRECTLY
+// app/page.js → FINAL 100% WORKING VERSION (NO ERRORS)
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -8,6 +8,8 @@ export default function Home() {
   const [originalData, setOriginalData] = useState([]);
   const [columns, setColumns] = useState([]);
   const [search, setSearch] = useState('');
+  const [minAge, setMinAge] = useState('');
+  const [maxAge, setMaxAge] = useState('');
   const [file, setFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
   const [editing, setEditing] = useState(null);
@@ -31,10 +33,8 @@ export default function Home() {
     if (result.length > 0) {
       const ignored = ['__v', 'createdAt', 'updatedAt', '_id', 'id'];
       const keys = Object.keys(result[0]).filter(k => !ignored.includes(k));
-
       setColumns(keys);
 
-      // Create empty form for Add Row
       const empty = {};
       keys.forEach(k => empty[k] = '');
       setNewRow(empty);
@@ -43,22 +43,33 @@ export default function Home() {
 
   useEffect(() => { load(); }, []);
 
+  // SEARCH + AGE FILTER
   useEffect(() => {
-    if (!search.trim()) {
-      setData(originalData);
-      setPage(1);
-      return;
+    let filtered = originalData;
+
+    if (search.trim()) {
+      const term = search.toLowerCase();
+      filtered = filtered.filter(row =>
+        columns.some(col => {
+          const value = row[col];
+          return value != null && String(value).toLowerCase().includes(term);
+        })
+      );
     }
-    const term = search.toLowerCase();
-    const filtered = originalData.filter(row =>
-      columns.some(col => {
-        const value = row[col];
-        return value != null && String(value).toLowerCase().includes(term);
-      })
-    );
+
+    if (minAge || maxAge) {
+      filtered = filtered.filter(row => {
+        const age = parseInt(row.age);
+        if (isNaN(age)) return false;
+        if (minAge && age < parseInt(minAge)) return false;
+        if (maxAge && age > parseInt(maxAge)) return false;
+        return true;
+      });
+    }
+
     setData(filtered);
     setPage(1);
-  }, [search, originalData, columns]);
+  }, [search, originalData, columns, minAge, maxAge]);
 
   async function uploadFile() {
     if (!file) return alert('Please select a file');
@@ -69,7 +80,7 @@ export default function Home() {
     if (res.ok) {
       const json = await res.json();
       setUploadStatus('success');
-      alert(`Success! Added: ${json.added}, Skipped: ${json.skipped}`);
+      alert(`Success! Added: ${json.added || json.message}, Skipped: ${json.skipped || 0}`);
       setFile(null);
       load();
     } else {
@@ -93,13 +104,21 @@ export default function Home() {
   };
 
   async function addRow() {
-    await fetch('/api/people', { method: 'POST', body: JSON.stringify(newRow), headers: { 'Content-Type': 'application/json' } });
+    await fetch('/api/people', {
+      method: 'POST',
+      body: JSON.stringify(newRow),
+      headers: { 'Content-Type': 'application/json' }
+    });
     setShowAdd(false);
     load();
   }
 
   async function saveEdit() {
-    await fetch(`/api/people/${editing._id}`, { method: 'PUT', body: JSON.stringify(editForm), headers: { 'Content-Type': 'application/json' } });
+    await fetch(`/api/people/${editing._id}`, {
+      method: 'PUT',
+      body: JSON.stringify(editForm),
+      headers: { 'Content-Type': 'application/json' }
+    });
     setEditing(null);
     load();
   }
@@ -115,10 +134,8 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50 py-12 px-6">
       <div className="max-w-7xl mx-auto">
 
-        {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-800 mb-2">Excel Data Manager</h1>
-          <p className="text-gray-600">Upload, view, edit & manage your data</p>
         </div>
 
         {/* Upload Section */}
@@ -134,15 +151,12 @@ export default function Home() {
             <svg className="mx-auto h-20 w-20 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 48 48">
               <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-8-8m0 0l-8 8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            <p className="mt-4 text-xl font-semibold text-gray-700">Drop file here or click to browse</p>
+            <p className="mt-4 text-xl font-semibold text-gray-700">Drop file here or click</p>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
           </div>
 
           {file && (
             <div className="mt-8 bg-green-50 border-2 border-green-200 rounded-xl px-6 py-5 flex items-center gap-4">
-              <svg className="w-10 h-10 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M3 4a2 2 0 012-2h10a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V4zm2 1v10h10V5H5z" clipRule="evenodd"/>
-              </svg>
               <span className="text-lg font-bold text-blue-700">{file.name}</span>
               <button onClick={() => setFile(null)} className="ml-auto text-green-700 hover:text-green-900 font-semibold">Remove</button>
             </div>
@@ -165,22 +179,52 @@ export default function Home() {
           {uploadStatus === 'error' && <p className="mt-6 text-red-600 text-center text-2xl font-bold">Upload Failed!</p>}
         </div>
 
-        {/* Controls */}
-        <div className="flex flex-wrap gap-6 mb-8">
+        {/* Controls + Age Filter */}
+        <div className="flex flex-wrap gap-6 mb-8 items-end">
           <button onClick={() => setShowAdd(true)} className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold">
             + Add New Row
           </button>
+
           <input
             placeholder="Search all columns..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="flex-1 min-w-64 px-6 py-3 border-2 border-gray-300 rounded-lg text-lg focus:border-green-500 focus:outline-none"
           />
+
+          <div className="flex gap-3 items-center">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Min Age</label>
+              <input
+                type="number"
+                value={minAge}
+                onChange={e => setMinAge(e.target.value)}
+                placeholder="1"
+                className="w-24 px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Age</label>
+              <input
+                type="number"
+                value={maxAge}
+                onChange={e => setMaxAge(e.target.value)}
+                placeholder="100"
+                className="w-24 px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
+              />
+            </div>
+            <button
+              onClick={() => { setMinAge(''); setMaxAge(''); }}
+              className="px-6 py-3 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium"
+            >
+              Clear
+            </button>
+          </div>
         </div>
 
         <div className="mb-6 text-gray-700 font-medium">
           Total Records: <span className="text-green-700 font-bold">{data.length}</span> | 
-          Showing {(page-1)*perPage + 1}–{Math.min(page*perPage, data.length)}
+          Showing {data.length === 0 ? '0' : (page - 1) * perPage + 1}–{data.length === 0 ? '0' : Math.min(page * perPage, data.length)} of {data.length}
         </div>
 
         {/* Table */}
@@ -237,7 +281,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Add/Edit Modal */}
+        {/* Modal */}
         {(showAdd || editing) && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-6">
             <div className="bg-white rounded-2xl shadow-2xl p-10 max-w-4xl w-full max-h-screen overflow-y-auto">
