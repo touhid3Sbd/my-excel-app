@@ -13,6 +13,7 @@ export async function GET(request) {
   const search = searchParams.get('search') || '';
   const minAge = searchParams.get('minAge') || '';
   const maxAge = searchParams.get('maxAge') || '';
+  const isExport = searchParams.get('export') === 'true';
 
   const filter = {};
 
@@ -21,20 +22,22 @@ export async function GET(request) {
       { name: { $regex: search, $options: 'i' } },
       { email: { $regex: search, $options: 'i' } },
       { city: { $regex: search, $options: 'i' } },
-      { phone: { $regex: search, $options: 'i' } }
+      { phone: { $regex: search, $options: 'i' } },
+      { age: { $regex: search, $options: 'i' } }
     ];
   }
 
   if (minAge || maxAge) {
     filter.age = {};
     if (minAge) filter.age.$gte = parseInt(minAge);
-    if (maxPage) filter.age.$lte = parseInt(maxAge);
+    if (maxAge) filter.age.$lte = parseInt(maxAge);
   }
 
-  const skip = (page - 1) * limit;
+  const skip = isExport ? 0 : (page - 1) * limit;
+  const limitValue = isExport ? 10000 : limit;
 
   const [data, total] = await Promise.all([
-    Person.find(filter).skip(skip).limit(limit).lean(),
+    Person.find(filter).skip(skip).limit(limitValue).lean(),
     Person.countDocuments(filter)
   ]);
 

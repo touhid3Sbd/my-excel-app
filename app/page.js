@@ -1,4 +1,4 @@
-// app/page.js → FINAL WITH MULTIPLE DELETE + SERVER-SIDE PAGINATION
+// app/page.js → FINAL: WITH DELETE ALL + PERFECT UI
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -18,14 +18,14 @@ export default function Home() {
   const [newRow, setNewRow] = useState({});
   const [editing, setEditing] = useState(null);
   const [editForm, setEditForm] = useState({});
-  const [selectedRows, setSelectedRows] = useState(new Set()); // MULTIPLE SELECT
-  const fileInputRef = useRef(null);
+  const [selectedRows, setSelectedRows] = useState(new Set());
   const [exporting, setExporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   async function load() {
     const params = new URLSearchParams();
     params.set('page', page);
-    if (search) params.set('search', search);
+    if (search.trim()) params.set('search', search.trim());
     if (minAge) params.set('minAge', minAge);
     if (maxAge) params.set('maxAge', maxAge);
 
@@ -35,7 +35,7 @@ export default function Home() {
     setData(result.data || []);
     setTotal(result.total || 0);
     setTotalPages(result.totalPages || 1);
-    setSelectedRows(new Set()); // clear selection when page changes
+    setSelectedRows(new Set());
   }
 
   useEffect(() => {
@@ -53,14 +53,14 @@ export default function Home() {
 
     if (res.ok) {
       const json = await res.json();
-      setUploadStatus('success');
       setUploadResult({ added: json.added || 0, skipped: json.skipped || 0 });
+      setUploadStatus(json.message === 'Duplicate data found' ? 'duplicate' : 'success');
       setFile(null);
       load();
     } else {
       setUploadStatus('error');
     }
-    setTimeout(() => setUploadStatus(''), 8000);
+    setTimeout(() => setUploadStatus(''), 10000);
   }
 
   const downloadTemplate = async () => {
@@ -95,7 +95,6 @@ export default function Home() {
     }
   }
 
-  // MULTIPLE DELETE
   async function deleteSelected() {
     if (selectedRows.size === 0) return alert('No rows selected');
     if (!confirm(`Delete ${selectedRows.size} rows permanently?`)) return;
@@ -107,6 +106,14 @@ export default function Home() {
     });
 
     setSelectedRows(new Set());
+    load();
+  }
+
+  // DELETE ALL FUNCTION
+  async function deleteAll() {
+    if (!confirm(`Delete ALL ${total} records permanently? This cannot be undone!`)) return;
+
+    await fetch('/api/people/clear-all', { method: 'POST' });
     load();
   }
 
@@ -126,11 +133,15 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-800">Excel Data Manager</h1>
+    <div className="min-h-screen bg-gray-50">
+      {/* Only Title */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          <h1 className="text-4xl font-bold text-gray-900">Excel Data Manager</h1>
         </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 py-8">
 
         {/* Upload Section */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border">
@@ -159,10 +170,20 @@ export default function Home() {
               </button>
             </div>
           </div>
+
+          {/* Messages */}
           {uploadStatus === 'success' && (
             <div className="mt-4 p-4 bg-green-100 border border-green-300 rounded-lg text-center">
               <p className="text-green-800 font-bold text-lg">
-                Upload Successful! Added: <span className="text-2xl">{uploadResult.added}</span> |
+                Upload Successful! Added: <span className="text-2xl">{uploadResult.added}</span> | 
+                Skipped: <span className="text-2xl">{uploadResult.skipped}</span>
+              </p>
+            </div>
+          )}
+          {uploadStatus === 'duplicate' && (
+            <div className="mt-4 p-4 bg-yellow-100 border border-yellow-300 rounded-lg text-center">
+              <p className="text-yellow-800 font-bold text-lg">
+                Duplicate data found! Added: <span className="text-2xl">{uploadResult.added}</span> | 
                 Skipped: <span className="text-2xl">{uploadResult.skipped}</span>
               </p>
             </div>
@@ -172,41 +193,26 @@ export default function Home() {
           )}
         </div>
 
-        {/* Controls + Multiple Delete */}
+        {/* Controls */}
         <div className="flex flex-wrap gap-6 mb-8 items-end">
-          <button onClick={() => setShowAdd(true)} className="bg-green-600 hover:bg-green-700 text-white px-4 py-4 rounded-lg font-semibold">
+          <button onClick={() => setShowAdd(true)} className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold">
             + Add Row
           </button>
 
-          {/* MULTIPLE DELETE BUTTON */}
-          <button
-            onClick={deleteSelected}
-            disabled={selectedRows.size === 0}
-            className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-4 rounded-lg font-medium text-sm transition flex items-center gap-2"
-            title={`Delete ${selectedRows.size} selected rows`}
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-2.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
+          <button onClick={deleteSelected} disabled={selectedRows.size === 0}
+            className="bg-red-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold">
             Delete ({selectedRows.size})
           </button>
+
           {/* DELETE ALL BUTTON */}
           <button
-            onClick={async () => {
-              if (!confirm(`Delete ALL ${total} records permanently?`)) return;
-              await fetch('/api/people/clear-all', { method: 'POST' });
-              load();
-            }}
-            className="bg-red-700 hover:bg-red-900 text-white px-4 py-4 rounded text-sm font-medium flex items-center gap-1.5"
-            title="Delete every record"
+            onClick={deleteAll}
+            className="bg-red-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold"
+            title="Delete all records permanently"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-2.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            All
+            Delete All ({total})
           </button>
 
-          {/* EXPORT TO EXCEL BUTTON */}
           <button
             onClick={async () => {
               setExporting(true);
@@ -214,56 +220,48 @@ export default function Home() {
               if (search) params.set('search', search);
               if (minAge) params.set('minAge', minAge);
               if (maxAge) params.set('maxAge', maxAge);
-              params.set('export', 'true'); // tells API to return all data
+              params.set('export', 'true');
 
               const res = await fetch(`/api/people/page?${params}`);
               const result = await res.json();
 
-              if (!result.data || result.data.length === 0) {
+              if (!result.data?.length) {
                 alert('No data to export');
                 setExporting(false);
                 return;
               }
 
-              // Use exceljs client-side for perfect formatting
               const { Workbook } = await import('exceljs');
               const wb = new Workbook();
               const ws = wb.addWorksheet('Data');
 
-              // Headers
               const headers = Object.keys(result.data[0]).filter(k =>
                 !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)
               );
               ws.addRow(headers.map(h => h.replace(/([A-Z])/g, ' $1').trim()));
 
-              // Data rows
               result.data.forEach(row => {
-                ws.addRow(headers.map(h => row[h] != null ? String(row[h]) : ''));
+                ws.addRow(headers.map(h => row[h] ?? ''));
               });
 
-              // Style header
               ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-              ws.getRow(1).fill = {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { argb: 'FF16A34A' }
-              };
+              ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF16A34A' } };
 
               const buffer = await wb.xlsx.writeBuffer();
-              const blob = new Blob([buffer], { type: 'application/octet-stream' });
+              const blob = new Blob([buffer]);
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = url;
-              a.download = `data-export-${new Date().toISOString().slice(0, 10)}.xlsx`;
+              a.download = `export-${new Date().toISOString().slice(0, 10)}.xlsx`;
               a.click();
               URL.revokeObjectURL(url);
               setExporting(false);
             }}
             disabled={exporting}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-6 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             {exporting ? 'Exporting...' : 'Export Excel'}
           </button>
@@ -271,55 +269,55 @@ export default function Home() {
           <input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
             className="flex-1 min-w-64 px-6 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
           />
-
-          
         </div>
 
-        {/* Table with Checkboxes */}
-        <div className="bg-white rounded-xl shadow-2xl overflow-hidden border">
+        {/* Records Info */}
+        <div className="mb-6 text-gray-700 font-medium">
+          Total: <span className="text-green-700 font-bold">{total}</span> | 
+          Showing {(page-1)*10 + 1}–{Math.min(page*10, total)} of {total}
+        </div>
+
+        {/* Table */}
+        <div className="bg-white rounded-lg shadow overflow-hidden border border-gray-200">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-green-100">
+              <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-6 py-4 text-center">
-                    <input
-                      type="checkbox"
-                      checked={selectedRows.size === data.length && data.length > 0}
-                      onChange={toggleAll}
-                      className="w-5 h-5 rounded border-gray-300"
-                    />
+                  <th className="px-6 py-4 text-left">
+                    <input type="checkbox" checked={selectedRows.size === data.length && data.length > 0} onChange={toggleAll} className="w-5 h-5 rounded border-gray-400 focus:ring-blue-500" />
                   </th>
-                  {data[0] && Object.keys(data[0]).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
-                    <th key={col} className="px-6 py-4 text-left font-semibold text-gray-700 capitalize">
+                  {data[0] && Object.keys(data[0]).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
+                    <th key={col} className="px-6 py-4 text-left text-sm font-medium text-gray-600">
                       {col.replace(/([A-Z])/g, ' $1').trim()}
                     </th>
                   ))}
-                  <th className="px-6 py-4 text-center font-semibold text-gray-700">Actions</th>
+                  <th className="px-6 py-4 text-center text-sm font-medium text-gray-600">Actions</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-gray-200">
                 {data.map(row => (
-                  <tr key={row._id} className="border-t hover:bg-green-50 transition">
+                  <tr key={row._id} className="hover:bg-gray-50 transition">
                     <td className="px-6 py-4 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedRows.has(row._id)}
-                        onChange={() => toggleRow(row._id)}
-                        className="w-5 h-5 rounded border-gray-300"
-                      />
+                      <input type="checkbox" checked={selectedRows.has(row._id)} onChange={() => toggleRow(row._id)} className="w-5 h-5 rounded border-gray-400 focus:ring-blue-500" />
                     </td>
-                    {Object.keys(row).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
-                      <td key={col} className="px-6 py-4 text-gray-800">
+                    {Object.keys(row).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
+                      <td key={col} className="px-6 py-4 text-sm text-gray-900">
                         {row[col] != null ? String(row[col]) : '-'}
                       </td>
                     ))}
-                    <td className="px-6 py-4 text-center space-x-3">
-                      <button onClick={() => { setEditing(row); setEditForm({ ...row }); }} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded font-medium">
-                        Edit
-                      </button>
-                      <button onClick={() => remove(row._id)} className="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded font-medium">
-                        Delete
-                      </button>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex justify-center gap-3">
+                        <button onClick={() => { setEditing(row); setEditForm({ ...row }); }} className="text-blue-600 hover:text-blue-800">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                        <button onClick={() => remove(row._id)} className="text-red-600 hover:text-red-800">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -329,18 +327,21 @@ export default function Home() {
         </div>
 
         {/* Pagination */}
-        <div className="flex justify-center gap-3 mt-10">
-          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-            className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50">
-            Previous
-          </button>
-          <span className="px-6 py-3 bg-green-600 text-white rounded font-bold">
-            Page {page} / {totalPages}
-          </span>
-          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-            className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50">
-            Next
-          </button>
+        <div className="flex items-center justify-between mt-8">
+          <p className="text-sm text-gray-600">
+            Showing {(page-1)*10 + 1}–{Math.min(page*10, total)} of {total}
+          </p>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+              Previous
+            </button>
+            <span className="px-4 py-2 bg-blue-600 text-white rounded font-medium">
+              {page}
+            </span>
+            <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+              Next
+            </button>
+          </div>
         </div>
 
         {/* Modal */}
@@ -351,7 +352,7 @@ export default function Home() {
                 {showAdd ? 'Add New Row' : 'Edit Row'}
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {data[0] && Object.keys(data[0]).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
+                {data[0] && Object.keys(data[0]).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
                   <div key={col}>
                     <label className="block font-medium text-gray-700 capitalize mb-2">
                       {col.replace(/([A-Z])/g, ' $1').trim()}
