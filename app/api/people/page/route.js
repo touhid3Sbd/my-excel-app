@@ -1,19 +1,19 @@
 // app/api/people/page/route.js
-// SERVER-SIDE PAGINATION + SEARCH + AGE FILTER
-import dbConnect from '@/lib/mongodb';
 import Person from '@/models/Person';
+import dbConnect from '@/lib/mongodb';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
   await dbConnect();
 
   const { searchParams } = new URL(request.url);
-  const page = parseInt(searchParams.get('page')) || 1;
+  const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
   const limit = 10;
   const search = searchParams.get('search') || '';
   const minAge = searchParams.get('minAge') || '';
   const maxAge = searchParams.get('maxAge') || '';
 
-  // Build filter
   const filter = {};
 
   if (search) {
@@ -26,12 +26,9 @@ export async function GET(request) {
   }
 
   if (minAge || maxAge) {
-    const ageFilter = {};
-    if (minAge) ageFilter.$gte = parseInt(minAge);
-    if (maxAge) ageFilter.$lte = parseInt(maxAge);
-    if (Object.keys(ageFilter).length > 0) {
-      filter.age = ageFilter;
-    }
+    filter.age = {};
+    if (minAge) filter.age.$gte = parseInt(minAge);
+    if (maxPage) filter.age.$lte = parseInt(maxAge);
   }
 
   const skip = (page - 1) * limit;
@@ -46,7 +43,5 @@ export async function GET(request) {
     total,
     page,
     totalPages: Math.ceil(total / limit),
-    hasNext: page < Math.ceil(total / limit),
-    hasPrev: page > 1
   });
 }
