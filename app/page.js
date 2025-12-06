@@ -1,4 +1,4 @@
-// app/page.js → FINAL 100% WORKING VERSION (NO ERRORS)
+// app/page.js → FINAL VERSION: 10 ROWS PER PAGE + EVERYTHING WORKING
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -17,7 +17,7 @@ export default function Home() {
   const [showAdd, setShowAdd] = useState(false);
   const [newRow, setNewRow] = useState({});
   const [page, setPage] = useState(1);
-  const perPage = 15;
+  const perPage = 10; // ← 10 ROWS PER PAGE
   const fileInputRef = useRef(null);
 
   const totalPages = Math.ceil(data.length / perPage);
@@ -28,7 +28,7 @@ export default function Home() {
     const result = await res.json();
     setData(result);
     setOriginalData(result);
-    setPage(1);
+    setPage(1); // Always start from page 1 after load
 
     if (result.length > 0) {
       const ignored = ['__v', 'createdAt', 'updatedAt', '_id', 'id'];
@@ -104,21 +104,13 @@ export default function Home() {
   };
 
   async function addRow() {
-    await fetch('/api/people', {
-      method: 'POST',
-      body: JSON.stringify(newRow),
-      headers: { 'Content-Type': 'application/json' }
-    });
+    await fetch('/api/people', { method: 'POST', body: JSON.stringify(newRow), headers: { 'Content-Type': 'application/json' } });
     setShowAdd(false);
     load();
   }
 
   async function saveEdit() {
-    await fetch(`/api/people/${editing._id}`, {
-      method: 'PUT',
-      body: JSON.stringify(editForm),
-      headers: { 'Content-Type': 'application/json' }
-    });
+    await fetch(`/api/people/${editing._id}`, { method: 'PUT', body: JSON.stringify(editForm), headers: { 'Content-Type': 'application/json' } });
     setEditing(null);
     load();
   }
@@ -134,6 +126,7 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50 py-12 px-6">
       <div className="max-w-7xl mx-auto">
 
+        {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-800 mb-2">Excel Data Manager</h1>
         </div>
@@ -199,7 +192,7 @@ export default function Home() {
                 type="number"
                 value={minAge}
                 onChange={e => setMinAge(e.target.value)}
-                placeholder="1"
+                placeholder="18"
                 className="w-24 px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
               />
             </div>
@@ -209,7 +202,7 @@ export default function Home() {
                 type="number"
                 value={maxAge}
                 onChange={e => setMaxAge(e.target.value)}
-                placeholder="100"
+                placeholder="60"
                 className="w-24 px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
               />
             </div>
@@ -222,6 +215,7 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Records Info */}
         <div className="mb-6 text-gray-700 font-medium">
           Total Records: <span className="text-green-700 font-bold">{data.length}</span> | 
           Showing {data.length === 0 ? '0' : (page - 1) * perPage + 1}–{data.length === 0 ? '0' : Math.min(page * perPage, data.length)} of {data.length}
@@ -264,7 +258,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Pagination */}
+        {/* Pagination - 10 per page */}
         {totalPages > 1 && (
           <div className="flex justify-center gap-3 mt-10">
             <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded font-medium disabled:opacity-50">
