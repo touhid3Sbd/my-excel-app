@@ -20,6 +20,7 @@ export default function Home() {
   const [editForm, setEditForm] = useState({});
   const [selectedRows, setSelectedRows] = useState(new Set()); // MULTIPLE SELECT
   const fileInputRef = useRef(null);
+  const [exporting, setExporting] = useState(false);
 
   async function load() {
     const params = new URLSearchParams();
@@ -205,27 +206,73 @@ export default function Home() {
             All
           </button>
 
+          {/* EXPORT TO EXCEL BUTTON */}
+          <button
+            onClick={async () => {
+              setExporting(true);
+              const params = new URLSearchParams();
+              if (search) params.set('search', search);
+              if (minAge) params.set('minAge', minAge);
+              if (maxAge) params.set('maxAge', maxAge);
+              params.set('export', 'true'); // tells API to return all data
+
+              const res = await fetch(`/api/people/page?${params}`);
+              const result = await res.json();
+
+              if (!result.data || result.data.length === 0) {
+                alert('No data to export');
+                setExporting(false);
+                return;
+              }
+
+              // Use exceljs client-side for perfect formatting
+              const { Workbook } = await import('exceljs');
+              const wb = new Workbook();
+              const ws = wb.addWorksheet('Data');
+
+              // Headers
+              const headers = Object.keys(result.data[0]).filter(k =>
+                !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)
+              );
+              ws.addRow(headers.map(h => h.replace(/([A-Z])/g, ' $1').trim()));
+
+              // Data rows
+              result.data.forEach(row => {
+                ws.addRow(headers.map(h => row[h] != null ? String(row[h]) : ''));
+              });
+
+              // Style header
+              ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+              ws.getRow(1).fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FF16A34A' }
+              };
+
+              const buffer = await wb.xlsx.writeBuffer();
+              const blob = new Blob([buffer], { type: 'application/octet-stream' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `data-export-${new Date().toISOString().slice(0, 10)}.xlsx`;
+              a.click();
+              URL.revokeObjectURL(url);
+              setExporting(false);
+            }}
+            disabled={exporting}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-6 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            {exporting ? 'Exporting...' : 'Export Excel'}
+          </button>
+
           <input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
             className="flex-1 min-w-64 px-6 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
           />
 
-          <div className="flex gap-3 items-end">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Min Age</label>
-              <input type="number" value={minAge} onChange={e => setMinAge(e.target.value)} placeholder="0"
-                className="w-24 px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Max Age</label>
-              <input type="number" value={maxAge} onChange={e => setMaxAge(e.target.value)} placeholder="00"
-                className="w-24 px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
-              />
-            </div>
-            <button onClick={() => { setMinAge(''); setMaxAge(''); }} className="px-6 py-3 bg-gray-500 hover:bg-gray-200 text-gray-700 rounded-lg font-medium">
-              Clear
-            </button>
-          </div>
+          
         </div>
 
         {/* Table with Checkboxes */}
