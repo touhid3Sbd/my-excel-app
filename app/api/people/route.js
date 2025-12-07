@@ -1,16 +1,17 @@
-// app/api/people/route.js → FINAL: FULL CRUD + EXPORT + SEARCH
+// app/api/people/route.js
 import Person from '@/models/Person';
 import { dbConnect } from '@/lib/mongodb';
 
 export const dynamic = 'force-dynamic';
 
-// GET: List people with pagination, search, age filter, and export
+// GET: List people with pagination, search, age filter
 export async function GET(request) {
   await dbConnect();
 
+  // ← Everything that uses request.url MUST be inside the function
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1'));
-  const limit = 15; // ← CHANGED TO 15 ROWS
+  const limit = 15;
   const search = url.searchParams.get('search') || '';
   const minAge = url.searchParams.get('minAge') || '';
   const maxAge = url.searchParams.get('maxAge') || '';
@@ -24,7 +25,7 @@ export async function GET(request) {
       { email: regex },
       { city: regex },
       { phone: regex },
-      { age: regex }
+      { age: { $regex: search, $options: 'i' } } // age should also be string regex if searching
     ];
   }
 
@@ -49,14 +50,13 @@ export async function GET(request) {
   });
 }
 
-// POST: Add new person (Add Row button)
+// POST: Add new person
 export async function POST(request) {
   await dbConnect();
-
   try {
     const body = await request.json();
 
-    // Remove unwanted fields
+    // Clean unwanted fields
     delete body._id;
     delete body.__v;
     delete body.createdAt;
@@ -73,11 +73,11 @@ export async function POST(request) {
 // PUT: Edit existing person
 export async function PUT(request) {
   await dbConnect();
-
   try {
     const { _id, ...updateData } = await request.json();
-    const person = await Person.findByIdAndUpdate(_id, updateData, { new: true });
-    
+
+    const person = await Person.findByIdAndUpdate(_id, updateData, { new: true, runValidators: true });
+
     if (!person) {
       return Response.json({ error: 'Person not found' }, { status: 404 });
     }
@@ -100,9 +100,13 @@ export async function DELETE(request) {
   }
 
   try {
-    await Person.findByIdAndDelete(id);
-    return Response.json({ message: 'Deleted' });
+    const result = await Person.findByIdAndDelete(id);
+    if (!result) {
+      return Response.json({ error: 'Person not found' }, { status: 404 });
+    }
+    return Response.json({ message: 'Deleted successfully' });
   } catch (error) {
+    console.error('Delete error:', error);
     return Response.json({ error: 'Failed to delete' }, { status: 500 });
   }
 }
