@@ -10,11 +10,10 @@ export async function GET(request) {
 
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1'));
-  const isExport = url.searchParams.get('export') === 'true';
-  const limit = isExport ? 100000 : 10;
+  const limit = 15; // ← CHANGED TO 15 ROWS
   const search = url.searchParams.get('search') || '';
   const minAge = url.searchParams.get('minAge') || '';
-  const maxAge = url.searchParams.get('max') || '';
+  const maxAge = url.searchParams.get('maxAge') || '';
 
   const filter = {};
 
@@ -35,7 +34,7 @@ export async function GET(request) {
     if (maxAge) filter.age.$lte = parseInt(maxAge);
   }
 
-  const skip = isExport ? 0 : (page - 1) * limit;
+  const skip = (page - 1) * limit;
 
   const [data, total] = await Promise.all([
     Person.find(filter).skip(skip).limit(limit).lean(),
@@ -43,7 +42,11 @@ export async function GET(request) {
   ]);
 
   return Response.json({
-    data, total, page, totalPages: Math.ceil(total / 10) });
+    data,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit)
+  });
 }
 
 // POST: Add new person (Add Row button)

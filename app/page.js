@@ -23,20 +23,21 @@ export default function Home() {
   const fileInputRef = useRef(null);
 
   async function load() {
-    const params = new URLSearchParams();
-    params.set('page', page);
-    if (search.trim()) params.set('search', search.trim());
-    if (minAge) params.set('minAge', minAge);
-    if (maxAge) params.set('maxAge', maxAge);
+  const params = new URLSearchParams();
+  params.set('page', page);
+  // NO LIMIT — API now controls it
+  if (search.trim()) params.set('search', search.trim());
+  if (minAge) params.set('minAge', minAge);
+  if (maxAge) params.set('maxAge', maxAge);
 
-    const res = await fetch(`/api/people?${params}`);
-    const result = await res.json();
+  const res = await fetch(`/api/people?${params}`);
+  const result = await res.json();
 
-    setData(result.data || []);
-    setTotal(result.total || 0);
-    setTotalPages(result.totalPages || 1);
-    setSelectedRows(new Set());
-  }
+  setData(result.data || []);
+  setTotal(result.total || 0);
+  setTotalPages(result.totalPages || 1);
+  setSelectedRows(new Set());
+}
 
   useEffect(() => {
     load();
@@ -326,7 +327,7 @@ export default function Home() {
         {/* Records Info */}
         <div className="mb-6 text-gray-700 font-medium">
           Total: <span className="text-green-700 font-bold">{total}</span> |
-          Showing {(page - 1) * 10 + 1}–{Math.min(page * 10, total)} of {total}
+          Showing {(page - 1) * 15 + 1}–{Math.min(page * 15, total)} of {total}
         </div>
 
         {/* Table */}
@@ -379,23 +380,103 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Pagination */}
-        <div className="flex items-center justify-between mt-8">
-          <p className="text-sm text-gray-600">
-            Showing {(page - 1) * 10 + 1}–{Math.min(page * 10, total)} of {total}
-          </p>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
-              Previous
+        {/* PAGINATION — NOW WITH "GO TO PAGE" INPUT */}
+<div className="flex items-center justify-between mt-8">
+
+  <div className="flex items-center gap-3">
+    {/* Previous Button */}
+    <button 
+      onClick={() => setPage(p => Math.max(1, p-1))} 
+      disabled={page === 1}
+      className="px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      Previous
+    </button>
+
+    {/* Page Numbers + Input */}
+    <div className="flex items-center gap-2">
+      {/* Show first page */}
+      {totalPages > 1 && (
+        <button 
+          onClick={() => setPage(1)}
+          className={`px-3 py-1.5 rounded ${page === 1 ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}`}
+        >
+          1
+        </button>
+      )}
+
+      {/* Dots if needed */}
+      {page > 4 && totalPages > 5 && <span className="text-gray-500">...</span>}
+
+      {/* Pages around current */}
+      {[...Array(totalPages)].map((_, i) => {
+        const p = i + 1;
+        if (p === 1 || p === totalPages || (p >= page - 1 && p <= page + 1)) {
+          return (
+            <button
+              key={p}
+              onClick={() => setPage(p)}
+              className={`px-3 py-1.5 rounded ${page === p ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}`}
+            >
+              {p}
             </button>
-            <span className="px-2 py-2 bg-blue-600 text-white rounded font-medium">
-              {page}
-            </span>
-            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
-              Next
-            </button>
-          </div>
-        </div>
+          );
+        }
+        return null;
+      }).filter(Boolean)}
+
+      {/* Dots if needed */}
+      {page < totalPages - 3 && totalPages > 5 && <span className="text-gray-500">...</span>}
+
+      {/* Last page */}
+      {totalPages > 1 && (
+        <button 
+          onClick={() => setPage(totalPages)}
+          className={`px-3 py-1.5 rounded ${page === totalPages ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}`}
+        >
+          {totalPages}
+        </button>
+      )}
+    </div>
+
+    {/* JUMP TO PAGE INPUT */}
+    <div className="flex items-center gap-2">
+      <span className="text-sm text-gray-600">Go to</span>
+      <input
+        type="number"
+        min="1"
+        max={totalPages}
+        value={page}
+        onChange={(e) => {
+          const val = parseInt(e.target.value);
+          if (!isNaN(val) && val >= 1 && val <= totalPages) {
+            setPage(val);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            const val = parseInt(e.target.value);
+            if (val >= 1 && val <= totalPages) {
+              setPage(val);
+            }
+          }
+        }}
+        className="w-16 px-2 py-1.5 text-center border border-gray-300 rounded focus:border-blue-500 focus:outline-none text-sm"
+        placeholder="Page"
+      />
+      <span className="text-sm text-gray-600">of {totalPages}</span>
+    </div>
+
+    {/* Next Button */}
+    <button 
+      onClick={() => setPage(p => Math.min(totalPages, p+1))} 
+      disabled={page === totalPages}
+      className="px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      Next
+    </button>
+  </div>
+</div>
 
         {/* Modal */}
         {(showAdd || editing) && (
