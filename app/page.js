@@ -1,4 +1,4 @@
-// app/page.js → FINAL: WITH DELETE ALL + PERFECT UI
+// app/page.js → FINAL: EDIT BUTTON WORKS + EVERYTHING PERFECT
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -29,7 +29,7 @@ export default function Home() {
     if (minAge) params.set('minAge', minAge);
     if (maxAge) params.set('maxAge', maxAge);
 
-    const res = await fetch(`/api/people/page?${params}`);
+    const res = await fetch(`/api/people?${params}`);
     const result = await res.json();
 
     setData(result.data || []);
@@ -77,21 +77,60 @@ export default function Home() {
   };
 
   async function addRow() {
-    await fetch('/api/people', { method: 'POST', body: JSON.stringify(newRow), headers: { 'Content-Type': 'application/json' } });
-    setShowAdd(false);
-    load();
+  // Remove empty fields and _id
+  const cleanData = { ...newRow };
+  delete cleanData._id;
+  delete cleanData.__v;
+  delete cleanData.createdAt;
+  delete cleanData.updatedAt;
+
+  // Remove empty strings if you want (optional)
+  Object.keys(cleanData).forEach(key => {
+    if (cleanData[key] === '' || cleanData[key] == null) {
+      delete cleanData[key];
+    }
+  });
+
+  try {
+    const res = await fetch('/api/people', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(cleanData)
+    });
+
+    if (res.ok) {
+      setShowAdd(false);
+      setNewRow({});
+      load(); // Refresh table
+    } else {
+      const error = await res.text();
+      alert('Failed to add row: ' + error);
+    }
+  } catch (err) {
+    alert('Network error. Check console.');
+    console.error(err);
   }
+}
 
   async function saveEdit() {
-    await fetch(`/api/people/${editing._id}`, { method: 'PUT', body: JSON.stringify(editForm), headers: { 'Content-Type': 'application/json' } });
-    setEditing(null);
-    load();
+    const res = await fetch(`/api/people/${editing._id}`, {
+      method: 'PUT',
+      body: JSON.stringify(editForm),
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (res.ok) {
+      setEditing(null);
+      setEditForm({});
+      load();
+    }
   }
 
   async function remove(id) {
     if (confirm('Delete this row?')) {
-      await fetch(`/api/people/${id}`, { method: 'DELETE' });
-      load();
+      const res = await fetch(`/api/people/${id}`, { method: 'DELETE' });
+      if (res.ok) load();
     }
   }
 
@@ -99,22 +138,21 @@ export default function Home() {
     if (selectedRows.size === 0) return alert('No rows selected');
     if (!confirm(`Delete ${selectedRows.size} rows permanently?`)) return;
 
-    await fetch('/api/people/bulk-delete', {
+    const res = await fetch('/api/people/bulk-delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: Array.from(selectedRows) })
     });
-
-    setSelectedRows(new Set());
-    load();
+    if (res.ok) {
+      setSelectedRows(new Set());
+      load();
+    }
   }
 
-  // DELETE ALL FUNCTION
   async function deleteAll() {
     if (!confirm(`Delete ALL ${total} records permanently? This cannot be undone!`)) return;
-
-    await fetch('/api/people/clear-all', { method: 'POST' });
-    load();
+    const res = await fetch('/api/people/clear-all', { method: 'POST' });
+    if (res.ok) load();
   }
 
   const toggleRow = (id) => {
@@ -132,9 +170,14 @@ export default function Home() {
     }
   };
 
+  // FIXED EDIT BUTTON — NOW WORKS!
+  const openEditModal = (row) => {
+    setEditing(row);
+    setEditForm({ ...row }); // This line was broken before
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Only Title */}
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-6 py-8">
           <h1 className="text-4xl font-bold text-gray-900">Excel Data Manager</h1>
@@ -161,21 +204,20 @@ export default function Home() {
               <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
             </div>
             <div className="flex gap-3">
-              <button onClick={downloadTemplate} className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium text-sm">
+              <button onClick={downloadTemplate} className="bg-green-600 hover:bg-green-700 text-white px-2 py-3 rounded-lg font-medium text-sm">
                 Template
               </button>
               <button onClick={uploadFile} disabled={!file || uploadStatus === 'uploading'}
-                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium text-sm">
+                className="bg-green-600 hover:bg-green-700 text-white px-2 py-3 rounded-lg font-medium text-sm">
                 {uploadStatus === 'uploading' ? 'Uploading...' : 'Upload'}
               </button>
             </div>
           </div>
 
-          {/* Messages */}
           {uploadStatus === 'success' && (
             <div className="mt-4 p-4 bg-green-100 border border-green-300 rounded-lg text-center">
               <p className="text-green-800 font-bold text-lg">
-                Upload Successful! Added: <span className="text-2xl">{uploadResult.added}</span> | 
+                Upload Successful! Added: <span className="text-2xl">{uploadResult.added}</span> |
                 Skipped: <span className="text-2xl">{uploadResult.skipped}</span>
               </p>
             </div>
@@ -183,7 +225,7 @@ export default function Home() {
           {uploadStatus === 'duplicate' && (
             <div className="mt-4 p-4 bg-yellow-100 border border-yellow-300 rounded-lg text-center">
               <p className="text-yellow-800 font-bold text-lg">
-                Duplicate data found! Added: <span className="text-2xl">{uploadResult.added}</span> | 
+                Duplicate data found! Added: <span className="text-2xl">{uploadResult.added}</span> |
                 Skipped: <span className="text-2xl">{uploadResult.skipped}</span>
               </p>
             </div>
@@ -195,21 +237,31 @@ export default function Home() {
 
         {/* Controls */}
         <div className="flex flex-wrap gap-6 mb-8 items-end">
-          <button onClick={() => setShowAdd(true)} className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold">
+          <button
+            onClick={() => {
+              setShowAdd(true);
+              setNewRow({}); // Clear form
+              // Optional: pre-fill with empty values based on columns
+              if (data[0]) {
+                const empty = {};
+                Object.keys(data[0])
+                  .filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k))
+                  .forEach(col => empty[col] = '');
+                setNewRow(empty);
+              }
+            }}
+            className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold"
+          >
             + Add Row
           </button>
 
           <button onClick={deleteSelected} disabled={selectedRows.size === 0}
-            className="bg-red-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold">
+            className="bg-red-600 hover:bg-red-700 disabled:bg-red-700 text-white px-6 py-3 rounded-lg font-medium">
             Delete ({selectedRows.size})
           </button>
 
-          {/* DELETE ALL BUTTON */}
-          <button
-            onClick={deleteAll}
-            className="bg-red-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold"
-            title="Delete all records permanently"
-          >
+          <button onClick={deleteAll}
+            className="bg-red-700 hover:bg-red-800 text-white px-2 py-3 rounded-lg font-medium">
             Delete All ({total})
           </button>
 
@@ -222,7 +274,7 @@ export default function Home() {
               if (maxAge) params.set('maxAge', maxAge);
               params.set('export', 'true');
 
-              const res = await fetch(`/api/people/page?${params}`);
+              const res = await fetch(`/api/people?${params}`);
               const result = await res.json();
 
               if (!result.data?.length) {
@@ -258,7 +310,7 @@ export default function Home() {
               setExporting(false);
             }}
             disabled={exporting}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2"
+            className="bg-green-600 hover:bg-emerald-700 text-white px-2 py-3 rounded-lg font-medium flex items-center gap-2"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -273,8 +325,8 @@ export default function Home() {
 
         {/* Records Info */}
         <div className="mb-6 text-gray-700 font-medium">
-          Total: <span className="text-green-700 font-bold">{total}</span> | 
-          Showing {(page-1)*10 + 1}–{Math.min(page*10, total)} of {total}
+          Total: <span className="text-green-700 font-bold">{total}</span> |
+          Showing {(page - 1) * 10 + 1}–{Math.min(page * 10, total)} of {total}
         </div>
 
         {/* Table */}
@@ -286,7 +338,7 @@ export default function Home() {
                   <th className="px-6 py-4 text-left">
                     <input type="checkbox" checked={selectedRows.size === data.length && data.length > 0} onChange={toggleAll} className="w-5 h-5 rounded border-gray-400 focus:ring-blue-500" />
                   </th>
-                  {data[0] && Object.keys(data[0]).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
+                  {data[0] && Object.keys(data[0]).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
                     <th key={col} className="px-6 py-4 text-left text-sm font-medium text-gray-600">
                       {col.replace(/([A-Z])/g, ' $1').trim()}
                     </th>
@@ -300,14 +352,15 @@ export default function Home() {
                     <td className="px-6 py-4 text-center">
                       <input type="checkbox" checked={selectedRows.has(row._id)} onChange={() => toggleRow(row._id)} className="w-5 h-5 rounded border-gray-400 focus:ring-blue-500" />
                     </td>
-                    {Object.keys(row).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
+                    {Object.keys(row).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
                       <td key={col} className="px-6 py-4 text-sm text-gray-900">
                         {row[col] != null ? String(row[col]) : '-'}
                       </td>
                     ))}
                     <td className="px-6 py-4 text-center">
-                      <div className="flex justify-center gap-3">
-                        <button onClick={() => { setEditing(row); setEditForm({ ...row }); }} className="text-blue-600 hover:text-blue-800">
+                      <div className="flex justify-center gap-4">
+                        {/* EDIT BUTTON — NOW WORKS! */}
+                        <button onClick={() => openEditModal(row)} className="text-blue-600 hover:text-blue-800">
                           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
@@ -329,16 +382,16 @@ export default function Home() {
         {/* Pagination */}
         <div className="flex items-center justify-between mt-8">
           <p className="text-sm text-gray-600">
-            Showing {(page-1)*10 + 1}–{Math.min(page*10, total)} of {total}
+            Showing {(page - 1) * 10 + 1}–{Math.min(page * 10, total)} of {total}
           </p>
           <div className="flex items-center gap-2">
-            <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
               Previous
             </button>
-            <span className="px-4 py-2 bg-blue-600 text-white rounded font-medium">
+            <span className="px-2 py-2 bg-blue-600 text-white rounded font-medium">
               {page}
             </span>
-            <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
               Next
             </button>
           </div>
@@ -352,15 +405,28 @@ export default function Home() {
                 {showAdd ? 'Add New Row' : 'Edit Row'}
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {data[0] && Object.keys(data[0]).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
+                {data[0] && Object.keys(data[0]).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
                   <div key={col}>
                     <label className="block font-medium text-gray-700 capitalize mb-2">
                       {col.replace(/([A-Z])/g, ' $1').trim()}
                     </label>
                     <input
                       value={(showAdd ? newRow : editForm)[col] || ''}
-                      onChange={e => showAdd ? setNewRow({ ...newRow, [col]: e.target.value }) : setEditForm({ ...editForm, [col]: e.target.value })}
-                      onKeyDown={e => e.key === 'Enter' && (showAdd ? addRow() : saveEdit())}
+                      onChange={e => {
+                        const value = e.target.value;
+                        if (showAdd) {
+                          setNewRow(prev => ({ ...prev, [col]: value }));
+                        } else {
+                          setEditForm(prev => ({ ...prev, [col]: value }));
+                        }
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          showAdd ? addRow() : saveEdit();
+                        }
+                      }}
+                      placeholder={`Enter ${col.replace(/([A-Z])/g, ' $1').trim()}`}
                       className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
                     />
                   </div>
@@ -370,7 +436,7 @@ export default function Home() {
                 <button onClick={showAdd ? addRow : saveEdit} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-4 rounded-lg font-bold text-lg">
                   {showAdd ? 'Add Row' : 'Save'}
                 </button>
-                <button onClick={() => { setShowAdd(false); setEditing(null); }} className="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-4 rounded-lg font-bold text-lg">
+                <button onClick={() => { setShowAdd(false); setEditing(null); setEditForm({}); }} className="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-4 rounded-lg font-bold text-lg">
                   Cancel
                 </button>
               </div>

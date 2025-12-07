@@ -1,6 +1,6 @@
 // app/api/people/[id]/route.js → FIXED FOR NEXT.JS 13+ APP ROUTER
-import dbConnect from '../../../../lib/mongodb';
-import Person from '../../../../models/Person';
+import { dbConnect } from '@/lib/mongodb';
+import Person from '@/models/Person';
 
 export async function PUT(request, { params }) {
   await dbConnect();

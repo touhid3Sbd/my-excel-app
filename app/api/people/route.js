@@ -1,21 +1,20 @@
-// app/api/people/route.js → 100% WORKING — BUILD-PROOF
+// app/api/people/route.js → FINAL: FULL CRUD + EXPORT + SEARCH
 import Person from '@/models/Person';
-import dbConnect from '@/lib/mongodb';
+import { dbConnect } from '@/lib/mongodb';
 
 export const dynamic = 'force-dynamic';
 
+// GET: List people with pagination, search, age filter, and export
 export async function GET(request) {
   await dbConnect();
 
   const url = new URL(request.url);
-  const searchParams = url.searchParams;
-
-  const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const isExport = searchParams.get('export') === 'true';
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1'));
+  const isExport = url.searchParams.get('export') === 'true';
   const limit = isExport ? 100000 : 10;
-  const search = searchParams.get('search') || '';
-  const minAge = searchParams.get('minAge') || '';
-  const maxAge = searchParams.get('maxAge') || '';
+  const search = url.searchParams.get('search') || '';
+  const minAge = url.searchParams.get('minAge') || '';
+  const maxAge = url.searchParams.get('max') || '';
 
   const filter = {};
 
@@ -44,9 +43,63 @@ export async function GET(request) {
   ]);
 
   return Response.json({
-    data,
-    total,
-    page,
-    totalPages: Math.ceil(total / 10)
-  });
+    data, total, page, totalPages: Math.ceil(total / 10) });
+}
+
+// POST: Add new person (Add Row button)
+export async function POST(request) {
+  await dbConnect();
+
+  try {
+    const body = await request.json();
+
+    // Remove unwanted fields
+    delete body._id;
+    delete body.__v;
+    delete body.createdAt;
+    delete body.updatedAt;
+
+    const person = await Person.create(body);
+    return Response.json(person, { status: 201 });
+  } catch (error) {
+    console.error('Add person error:', error);
+    return Response.json({ error: 'Failed to add person' }, { status: 500 });
+  }
+}
+
+// PUT: Edit existing person
+export async function PUT(request) {
+  await dbConnect();
+
+  try {
+    const { _id, ...updateData } = await request.json();
+    const person = await Person.findByIdAndUpdate(_id, updateData, { new: true });
+    
+    if (!person) {
+      return Response.json({ error: 'Person not found' }, { status: 404 });
+    }
+    return Response.json(person);
+  } catch (error) {
+    console.error('Update error:', error);
+    return Response.json({ error: 'Failed to update' }, { status: 500 });
+  }
+}
+
+// DELETE: Single delete
+export async function DELETE(request) {
+  await dbConnect();
+
+  const url = new URL(request.url);
+  const id = url.searchParams.get('id');
+
+  if (!id) {
+    return Response.json({ error: 'ID required' }, { status: 400 });
+  }
+
+  try {
+    await Person.findByIdAndDelete(id);
+    return Response.json({ message: 'Deleted' });
+  } catch (error) {
+    return Response.json({ error: 'Failed to delete' }, { status: 500 });
+  }
 }

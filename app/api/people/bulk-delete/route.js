@@ -1,4 +1,5 @@
 // app/api/people/bulk-delete/route.js
+import { dbConnect } from '@/lib/mongodb';
 import Person from '@/models/Person';
 
 export async function POST(request) {
