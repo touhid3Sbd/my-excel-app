@@ -1,11 +1,11 @@
-// app/api/upload/route.js → VERCEL BLOB + SAFE EXCEL IMPORT (2025 BEST PRACTICE)
+// app/api/upload/route.js → 100% WORKING ON VERCEL + BLOB + EXCEL IMPORT
 import { put } from '@vercel/blob';
 import { NextResponse } from 'next/server';
 import { dbConnect } from '@/lib/mongodb';
 import Person from '@/models/Person';
 
-export const runtime = 'nodejs'; // Important: exceljs needs Node.js runtime
-export const maxDuration = 60;   // Allow up to 60s (Vercel Pro needed for >10s)
+export const runtime = 'nodejs';
+export const maxDuration = 60; // 60 seconds (requires Vercel Pro or Hobby with boost)
 
 export async function POST(request) {
   try {
@@ -14,104 +14,103 @@ export async function POST(request) {
     const formData = await request.formData();
     const file = formData.get('file');
 
-    if (!file || !file.name) {
+    if (!file || !(file instanceof File)) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
 
-    // Optional: limit file size (e.g., 10 MB)
+    // Optional: limit file size (10MB)
     if (file.size > 10 * 1024 * 1024) {
-      return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 400 });
+      return NextResponse.json({ error: 'File too large. Max 10MB.' }, { status: 400 });
     }
 
-    // Upload directly to Vercel Blob (fast, durable, public URL)
-    const { url, downloadUrl } = await put(`uploads/${Date.now()}-${file.name}`, file.stream(), {
+    // Step 1: Upload to Vercel Blob (this triggers token creation automatically)
+    const blob = await put(`excel-uploads/${Date.now()}-${file.name}`, file.stream(), {
       access: 'public',
       addRandomSuffix: true,
+      token: process.env.BLOB_READ_WRITE_TOKEN, // ← Vercel injects this automatically
     });
 
-    // Now safely parse the file from the stable URL
-    const response = await fetch(downloadUrl);
+    // Step 2: Download the blob to parse it (safe & reliable)
+    const response = await fetch(blob.downloadUrl);
+    if (!response.ok) throw new Error('Failed to download uploaded file');
+
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
+    // Step 3: Parse Excel with exceljs
     const { Workbook } = await import('exceljs');
     const workbook = new Workbook();
     await workbook.xlsx.load(buffer);
-    const ws = workbook.worksheets[0];
+    const worksheet = workbook.worksheets[0];
 
-    if (!ws || ws.rowCount <= 1) {
-      return NextResponse.json({ error: 'Empty file or no data rows' }, { status: 400 });
+    if (!worksheet || worksheet.rowCount <= 1) {
+      return NextResponse.json({ error: 'No data in file' }, { status: 400 });
     }
 
-    // === Header Detection (same smart logic as yours) ===
-    const rawHeaders = {};
-    ws.getRow(1).eachCell((cell, colNumber) => {
-      rawHeaders[colNumber] = String(cell.value || '').trim().toLowerCase();
+    // === Smart Header Detection (your awesome logic) ===
+    const headers = {};
+    worksheet.getRow(1).eachCell((cell, colNumber) => {
+      const value = cell.value ? String(cell.value).trim().toLowerCase() : '';
+      headers[colNumber] = value;
     });
 
-    const headerMap = {
+    const fieldMap = {
       name: ['name', 'full name', 'person name', 'fullname'],
-      age: ['age', 'years', 'age in years'],
-      email: ['email', 'mail', 'e-mail', 'email address'],
+      age: ['age', 'years'],
+      email: ['email', 'e-mail', 'mail'],
       city: ['city', 'town', 'location'],
       phone: ['phone', 'mobile', 'contact', 'number'],
     };
 
-    const reverseMap = {};
-    Object.keys(headerMap).forEach(dbField => {
-      headerMap[dbField].forEach(alias => {
-        reverseMap[alias.toLowerCase()] = dbField;
-      });
+    const columnToField = {};
+    Object.entries(headers).forEach(([col, header]) => {
+      const found = Object.entries(fieldMap).find(([field, aliases]) =>
+        aliases.includes(header) || header.includes(field)
+      );
+      columnToField[col] = found ? found[0] : header;
     });
 
-    // === Parse rows ===
+    // === Extract rows ===
     const rows = [];
-    ws.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber === 1) return;
       const obj = {};
       row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-        const headerText = rawHeaders[colNumber];
-        const dbField = reverseMap[headerText] || headerText;
-        obj[dbField] = cell.value;
+        const field = columnToField[colNumber];
+        obj[field] = cell.value;
       });
       rows.push(obj);
     });
 
-    const validRows = rows.filter(r =>
-      Object.values(r).some(v => v != null && v !== '' && v !== undefined)
+    // === Remove empty rows ===
+    const validRows = rows.filter(row =>
+      Object.values(row).some(val =>
+        val !== null && val !== undefined && val !== ''
+      )
     );
 
     if (validRows.length === 0) {
-      return NextResponse.json({ added: 0, skipped: 0, message: 'No valid data' });
+      return NextResponse.json({ added: 0, skipped: 0, message: 'No valid data found' });
     }
 
-    // === Smart duplicate detection by email ===
-    const emailsInFile = validRows
-      .map(row => {
-        const emailField = row.email || Object.values(row).find(v =>
-          typeof v === 'string' && v.includes('@') && /\.\w+$/.test(v)
-        );
-        return emailField ? String(emailField).trim().toLowerCase() : null;
-      })
-      .filter(Boolean);
+    // === Duplicate detection by email ===
+    const emails = validRows
+      .map(r => r.email || Object.values(r).find(v => typeof v === 'string' && v.includes('@')))
+      .filter(Boolean)
+      .map(e => String(e).trim().toLowerCase());
 
-    let added = 0;
     let skipped = 0;
+    let added = 0;
 
-    if (emailsInFile.length > 0) {
-      const existing = await Person.find(
-        { email: { $in: emailsInFile } }
-      ).select('email').lean();
-
-      const existingEmails = new Set(existing.map(e => e.email.toLowerCase()));
+    if (emails.length > 0) {
+      const existing = await Person.find({ email: { $in: emails } }).select('email').lean();
+      const existingSet = new Set(existing.map(e => e.email.toLowerCase()));
 
       const newRows = validRows.filter(row => {
-        const email = row.email || Object.values(row).find(v =>
-          typeof v === 'string' && v.includes('@')
-        );
+        const email = row.email || Object.values(row).find(v => typeof v === 'string' && v.includes('@'));
         if (!email) return true;
         const normalized = String(email).trim().toLowerCase();
-        if (existingEmails.has(normalized)) {
+        if (existingSet.has(normalized)) {
           skipped++;
           return false;
         }
@@ -128,16 +127,17 @@ export async function POST(request) {
     }
 
     return NextResponse.json({
+      success: true,
       added,
       skipped,
-      fileUrl: url, // optional: show user the uploaded file
-      message: skipped > 0 ? `${skipped} duplicates skipped` : 'All rows imported!'
+      uploadedFile: blob.url,
+      message: added > 0 ? `Success! ${added} rows imported` : 'No new data (all duplicates)',
     });
 
   } catch (error) {
-    console.error('Upload & import error:', error);
+    console.error('Upload failed:', error);
     return NextResponse.json(
-      { error: 'Import failed. File may be corrupted or too large.' },
+      { error: 'Upload failed', details: error.message },
       { status: 500 }
     );
   }
