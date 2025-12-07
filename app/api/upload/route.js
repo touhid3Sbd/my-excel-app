@@ -1,7 +1,11 @@
-// app/api/upload/route.js → FINAL: UPLOAD WORKS 100% ON VERCEL & LOCAL
+// app/api/upload/route.js → VERCEL BLOB + SAFE EXCEL IMPORT (2025 BEST PRACTICE)
+import { put } from '@vercel/blob';
 import { NextResponse } from 'next/server';
 import { dbConnect } from '@/lib/mongodb';
 import Person from '@/models/Person';
+
+export const runtime = 'nodejs'; // Important: exceljs needs Node.js runtime
+export const maxDuration = 60;   // Allow up to 60s (Vercel Pro needed for >10s)
 
 export async function POST(request) {
   try {
@@ -10,11 +14,25 @@ export async function POST(request) {
     const formData = await request.formData();
     const file = formData.get('file');
 
-    if (!file) {
+    if (!file || !file.name) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    // Optional: limit file size (e.g., 10 MB)
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 400 });
+    }
+
+    // Upload directly to Vercel Blob (fast, durable, public URL)
+    const { url, downloadUrl } = await put(`uploads/${Date.now()}-${file.name}`, file.stream(), {
+      access: 'public',
+      addRandomSuffix: true,
+    });
+
+    // Now safely parse the file from the stable URL
+    const response = await fetch(downloadUrl);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
     const { Workbook } = await import('exceljs');
     const workbook = new Workbook();
@@ -22,22 +40,21 @@ export async function POST(request) {
     const ws = workbook.worksheets[0];
 
     if (!ws || ws.rowCount <= 1) {
-      return NextResponse.json({ error: 'File is empty or has no data' }, { status: 400 });
+      return NextResponse.json({ error: 'Empty file or no data rows' }, { status: 400 });
     }
 
-    // Read headers
+    // === Header Detection (same smart logic as yours) ===
     const rawHeaders = {};
     ws.getRow(1).eachCell((cell, colNumber) => {
       rawHeaders[colNumber] = String(cell.value || '').trim().toLowerCase();
     });
 
-    // Header mapping
     const headerMap = {
       name: ['name', 'full name', 'person name', 'fullname'],
       age: ['age', 'years', 'age in years'],
       email: ['email', 'mail', 'e-mail', 'email address'],
       city: ['city', 'town', 'location'],
-      phone: ['phone', 'mobile', 'contact', 'number']
+      phone: ['phone', 'mobile', 'contact', 'number'],
     };
 
     const reverseMap = {};
@@ -47,7 +64,7 @@ export async function POST(request) {
       });
     });
 
-    // Read rows
+    // === Parse rows ===
     const rows = [];
     ws.eachRow({ includeEmpty: true }, (row, rowNumber) => {
       if (rowNumber === 1) return;
@@ -60,45 +77,42 @@ export async function POST(request) {
       rows.push(obj);
     });
 
-    // Filter valid rows
     const validRows = rows.filter(r =>
       Object.values(r).some(v => v != null && v !== '' && v !== undefined)
     );
 
     if (validRows.length === 0) {
-      return NextResponse.json({ added: 0, skipped: 0, message: 'No valid data found' });
+      return NextResponse.json({ added: 0, skipped: 0, message: 'No valid data' });
     }
 
-    // Extract emails for duplicate check
+    // === Smart duplicate detection by email ===
     const emailsInFile = validRows
       .map(row => {
-        if (row.email && typeof row.email === 'string') {
-          return row.email.trim().toLowerCase();
-        }
-        const emailValue = Object.values(row).find(v =>
-          typeof v === 'string' && v.includes('@') && v.includes('.')
+        const emailField = row.email || Object.values(row).find(v =>
+          typeof v === 'string' && v.includes('@') && /\.\w+$/.test(v)
         );
-        return emailValue ? emailValue.trim().toLowerCase() : null;
+        return emailField ? String(emailField).trim().toLowerCase() : null;
       })
       .filter(Boolean);
 
     let added = 0;
     let skipped = 0;
-    let duplicateFound = false;
 
     if (emailsInFile.length > 0) {
-      const existing = await Person.find({ email: { $in: emailsInFile } }).select('email').lean();
+      const existing = await Person.find(
+        { email: { $in: emailsInFile } }
+      ).select('email').lean();
+
       const existingEmails = new Set(existing.map(e => e.email.toLowerCase()));
 
       const newRows = validRows.filter(row => {
-        const email = Object.values(row).find(v =>
-          typeof v === 'string' && v.includes('@') && v.includes('.')
+        const email = row.email || Object.values(row).find(v =>
+          typeof v === 'string' && v.includes('@')
         );
         if (!email) return true;
-        const normalized = email.trim().toLowerCase();
+        const normalized = String(email).trim().toLowerCase();
         if (existingEmails.has(normalized)) {
           skipped++;
-          duplicateFound = true;
           return false;
         }
         return true;
@@ -116,11 +130,15 @@ export async function POST(request) {
     return NextResponse.json({
       added,
       skipped,
-      message: duplicateFound ? 'Duplicate data found' : 'Upload successful'
+      fileUrl: url, // optional: show user the uploaded file
+      message: skipped > 0 ? `${skipped} duplicates skipped` : 'All rows imported!'
     });
 
   } catch (error) {
-    console.error('Upload error:', error);
-    return NextResponse.json({ error: 'Upload failed. Check server logs.' }, { status: 500 });
+    console.error('Upload & import error:', error);
+    return NextResponse.json(
+      { error: 'Import failed. File may be corrupted or too large.' },
+      { status: 500 }
+    );
   }
 }
