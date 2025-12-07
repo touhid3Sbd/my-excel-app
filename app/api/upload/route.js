@@ -1,11 +1,11 @@
-// app/api/upload/route.js → 100% WORKING ON VERCEL + BLOB + EXCEL IMPORT
+// app/api/upload/route.js
 import { put } from '@vercel/blob';
 import { NextResponse } from 'next/server';
 import { dbConnect } from '@/lib/mongodb';
 import Person from '@/models/Person';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60; // 60 seconds (requires Vercel Pro or Hobby with boost)
+export const maxDuration = 60; // Vercel Pro/Hobby needed for >10s
 
 export async function POST(request) {
   try {
@@ -18,99 +18,91 @@ export async function POST(request) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
 
-    // Optional: limit file size (10MB)
+    // Optional: limit size
     if (file.size > 10 * 1024 * 1024) {
-      return NextResponse.json({ error: 'File too large. Max 10MB.' }, { status: 400 });
+      return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 400 });
     }
 
-    // Step 1: Upload to Vercel Blob (this triggers token creation automatically)
-    const blob = await put(`excel-uploads/${Date.now()}-${file.name}`, file.stream(), {
+    // Upload to Vercel Blob
+    const blob = await put(`uploads/${Date.now()}-${file.name}`, file.stream(), {
       access: 'public',
       addRandomSuffix: true,
-      token: process.env.BLOB_READ_WRITE_TOKEN, // ← Vercel injects this automatically
     });
 
-    // Step 2: Download the blob to parse it (safe & reliable)
+    // Download & parse
     const response = await fetch(blob.downloadUrl);
-    if (!response.ok) throw new Error('Failed to download uploaded file');
+    const buffer = Buffer.from(await response.arrayBuffer());
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // Step 3: Parse Excel with exceljs
     const { Workbook } = await import('exceljs');
     const workbook = new Workbook();
     await workbook.xlsx.load(buffer);
-    const worksheet = workbook.worksheets[0];
+    const ws = workbook.getWorksheet(1);
 
-    if (!worksheet || worksheet.rowCount <= 1) {
-      return NextResponse.json({ error: 'No data in file' }, { status: 400 });
+    if (!ws || ws.rowCount <= 1) {
+      return NextResponse.json({ error: 'Empty file' }, { status: 400 });
     }
 
-    // === Smart Header Detection (your awesome logic) ===
-    const headers = {};
-    worksheet.getRow(1).eachCell((cell, colNumber) => {
-      const value = cell.value ? String(cell.value).trim().toLowerCase() : '';
-      headers[colNumber] = value;
+    // Header mapping
+    const headerRow = ws.getRow(1);
+    const headerMap = {};
+    headerRow.eachCell((cell, col) => {
+      const val = cell.value ? String(cell.value).trim().toLowerCase() : '';
+      headerMap[col] = val;
     });
 
-    const fieldMap = {
-      name: ['name', 'full name', 'person name', 'fullname'],
+    const fieldAliases = {
+      name: ['name', 'full name', 'person', 'fullname'],
       age: ['age', 'years'],
       email: ['email', 'e-mail', 'mail'],
       city: ['city', 'town', 'location'],
       phone: ['phone', 'mobile', 'contact', 'number'],
     };
 
-    const columnToField = {};
-    Object.entries(headers).forEach(([col, header]) => {
-      const found = Object.entries(fieldMap).find(([field, aliases]) =>
+    const colToField = {};
+    Object.entries(headerMap).forEach(([col, header]) => {
+      const match = Object.entries(fieldAliases).find(([field, aliases]) =>
         aliases.includes(header) || header.includes(field)
       );
-      columnToField[col] = found ? found[0] : header;
+      colToField[col] = match ? match[0] : header;
     });
 
-    // === Extract rows ===
+    // Read data rows
     const rows = [];
-    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber === 1) return;
+    ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
+      if (rowNum === 1) return;
       const obj = {};
-      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-        const field = columnToField[colNumber];
-        obj[field] = cell.value;
+      row.eachCell({ includeEmpty: true }, (cell, col) => {
+        obj[colToField[col]] = cell.value;
       });
       rows.push(obj);
     });
 
-    // === Remove empty rows ===
-    const validRows = rows.filter(row =>
-      Object.values(row).some(val =>
-        val !== null && val !== undefined && val !== ''
-      )
+    const validRows = rows.filter(r =>
+      Object.values(r).some(v => v != null && v !== '')
     );
 
     if (validRows.length === 0) {
-      return NextResponse.json({ added: 0, skipped: 0, message: 'No valid data found' });
+      return NextResponse.json({ added: 0, skipped: 0, message: 'No valid rows' });
     }
 
-    // === Duplicate detection by email ===
+    // Duplicate check
     const emails = validRows
       .map(r => r.email || Object.values(r).find(v => typeof v === 'string' && v.includes('@')))
       .filter(Boolean)
       .map(e => String(e).trim().toLowerCase());
 
-    let skipped = 0;
     let added = 0;
+    let skipped = 0;
 
     if (emails.length > 0) {
-      const existing = await Person.find({ email: { $in: emails } }).select('email').lean();
-      const existingSet = new Set(existing.map(e => e.email.toLowerCase()));
+      const existing = await Person.find({ email: { $in: emails } }).lean();
+      const existingEmails = new Set(existing.map(e => e.email.toLowerCase()));
 
       const newRows = validRows.filter(row => {
         const email = row.email || Object.values(row).find(v => typeof v === 'string' && v.includes('@'));
         if (!email) return true;
-        const normalized = String(email).trim().toLowerCase();
-        if (existingSet.has(normalized)) {
+        const norm = String(email).trim().toLowerCase();
+        if (existingEmails.has(norm)) {
           skipped++;
           return false;
         }
@@ -130,12 +122,12 @@ export async function POST(request) {
       success: true,
       added,
       skipped,
-      uploadedFile: blob.url,
-      message: added > 0 ? `Success! ${added} rows imported` : 'No new data (all duplicates)',
+      fileUrl: blob.url,
+      message: `${added} rows imported${skipped > 0 ? `, ${skipped} duplicates skipped` : ''}`
     });
 
   } catch (error) {
-    console.error('Upload failed:', error);
+    console.error('Upload error:', error);
     return NextResponse.json(
       { error: 'Upload failed', details: error.message },
       { status: 500 }
