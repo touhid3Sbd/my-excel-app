@@ -1,14 +1,9 @@
-// models/Person.js → FULLY DYNAMIC (NO REQUIRED FIELDS EVER!)
+// models/Person.js → FULLY DYNAMIC: ACCEPTS ANY FIELDS
 import mongoose from 'mongoose';
 
-const personSchema = new mongoose.Schema(
-  {}, 
-  { 
-    strict: false,      // Accept ANY fields from Excel
-    timestamps: true,   // Keep createdAt/updatedAt
-    collection: 'people'
-  }
-);
+const personSchema = new mongoose.Schema({}, {
+  strict: false,  // Allows ANY fields from Excel
+  timestamps: true
+});
 
-const Person = mongoose.models.Person || mongoose.model('Person', personSchema);
-export default Person;
+export default mongoose.models.Person || mongoose.model('Person', personSchema);

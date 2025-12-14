@@ -1,11 +1,7 @@
-// app/api/upload/route.js → WORKS ON LOCALHOST + VERCEL PRODUCTION
-import { put } from '@vercel/blob';
+// app/api/upload/route.js → FULLY DYNAMIC: WORKS WITH ANY EXCEL FORMAT
 import { NextResponse } from 'next/server';
-import { dbConnect } from '@/lib/mongodb';
 import Person from '@/models/Person';
-
-// Auto-switch: use real Vercel Blob in production, fallback to memory in dev
-const isDev = process.env.NODE_ENV === 'development';
+import { dbConnect } from '@/lib/mongodb';
 
 export async function POST(request) {
   try {
@@ -13,126 +9,121 @@ export async function POST(request) {
 
     const formData = await request.formData();
     const file = formData.get('file');
+    if (!file) return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
 
-    if (!file || !(file instanceof File)) {
-      return NextResponse.json({ error: 'No file selected' }, { status: 400 });
-    }
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-    let buffer;
-    let fileUrl = null;
-
-    if (isDev) {
-      // LOCALHOST: Just read file into memory (no blob needed)
-      buffer = Buffer.from(await file.arrayBuffer());
-      fileUrl = `http://localhost:3000/temp/${file.name}`;
-      console.log('Dev mode: File loaded into memory');
-    } else {
-      // PRODUCTION: Upload to Vercel Blob
-      const blob = await put(`uploads/${Date.now()}-${file.name}`, file.stream(), {
-        access: 'public',
-        addRandomSuffix: true,
-      });
-      fileUrl = blob.url;
-
-      const response = await fetch(blob.downloadUrl);
-      buffer = Buffer.from(await response.arrayBuffer());
-      console.log('Production: File uploaded to Vercel Blob →', fileUrl);
-    }
-
-    // Now parse Excel (works the same everywhere)
     const { Workbook } = await import('exceljs');
     const workbook = new Workbook();
     await workbook.xlsx.load(buffer);
     const ws = workbook.worksheets[0];
+    if (!ws || ws.rowCount <= 1) return NextResponse.json({ error: 'Empty file or no data rows' }, { status: 400 });
 
-    if (!ws || ws.rowCount <= 1) {
-      return NextResponse.json({ error: 'Empty Excel file' }, { status: 400 });
+    // READ HEADERS DYNAMICALLY
+    const headers = [];
+    ws.getRow(1).eachCell((cell, colNumber) => {
+      let headerText = '';
+      if (cell.value) {
+        if (typeof cell.value === 'string') {
+          headerText = cell.value;
+        } else if (cell.value.richText) {
+          headerText = cell.value.richText.map(rt => rt.text).join('');
+        } else if (cell.value.text) {
+          headerText = cell.value.text;
+        } else {
+          headerText = String(cell.value);
+        }
+      }
+      const cleanHeader = headerText.trim();
+      // Convert to snake_case for DB field
+      const dbField = cleanHeader
+        .toLowerCase()
+        .replace(/\s+/g, '_')
+        .replace(/[^a-z0-9_]/g, '');
+      headers[colNumber - 1] = { original: cleanHeader, db: dbField || `column_${colNumber}` };
+    });
+
+    // READ ROWS
+    const rows = [];
+    for (let rowNumber = 2; rowNumber <= ws.rowCount; rowNumber++) {
+      const row = ws.getRow(rowNumber);
+      const obj = {};
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        const header = headers[colNumber - 1];
+        if (!header) return;
+
+        let cellValue = cell.value;
+
+        // Handle different cell types safely
+        if (cellValue === null || cellValue === undefined) {
+          cellValue = '';
+        } else if (typeof cellValue === 'object') {
+          if (cellValue.richText) {
+            cellValue = cellValue.richText.map(rt => rt.text).join('');
+          } else if (cellValue.result) {
+            cellValue = cellValue.result;
+          } else if (cellValue.formula) {
+            cellValue = ''; // ignore formula
+          } else {
+            cellValue = String(cellValue);
+          }
+        } else {
+          cellValue = String(cellValue);
+        }
+
+        obj[header.db] = cellValue.trim();
+      });
+
+      // Skip completely empty rows
+      const hasValue = Object.values(obj).some(v => v !== '');
+      if (hasValue) rows.push(obj);
     }
 
-    // === Your smart header detection (unchanged) ===
-    const headers = {};
-    ws.getRow(1).eachCell((cell, col) => {
-      headers[col] = String(cell.value || '').trim().toLowerCase();
-    });
+    if (rows.length === 0) {
+      return NextResponse.json({ added: 0, skipped: 0, message: 'No valid data found' });
+    }
 
-    const fieldMap = {
-      name: ['name', 'full name', 'person'],
-      age: ['age', 'years'],
-      email: ['email', 'e-mail', 'mail'],
-      city: ['city', 'town'],
-      phone: ['phone', 'mobile', 'contact'],
-    };
+    // DUPLICATE CHECK on first column (usually Sl or ID)
+    const firstField = headers[0]?.db;
+    const keysInFile = rows
+      .map(row => row[firstField] ? String(row[firstField]).trim().toLowerCase() : null)
+      .filter(Boolean);
 
-    const colToField = {};
-    Object.entries(headers).forEach(([col, h]) => {
-      const match = Object.entries(fieldMap).find(([f, aliases]) =>
-        aliases.some(a => h.includes(a)) || h.includes(f)
-      );
-      colToField[col] = match ? match[0] : h;
-    });
-
-    const rows = [];
-    ws.eachRow({ includeEmpty: false }, (row, n) => {
-      if (n === 1) return;
-      const obj = {};
-      row.eachCell({ includeEmpty: true }, (cell, col) => {
-        obj[colToField[col]] = cell.value;
-      });
-      rows.push(obj);
-    });
-
-    const validRows = rows.filter(r => Object.values(r).some(v => v != null && v !== ''));
-
-    // === Duplicate check & insert (same as before) ===
     let added = 0;
     let skipped = 0;
+    let duplicateFound = false;
 
-    if (validRows.length > 0) {
-      const emails = validRows
-        .map(r => r.email || Object.values(r).find(v => typeof v === 'string' && v.includes('@')))
-        .filter(Boolean)
-        .map(e => String(e).trim().toLowerCase());
+    if (keysInFile.length > 0) {
+      const existing = await Person.find({ [firstField]: { $in: keysInFile } }).select(firstField).lean();
+      const existingKeys = new Set(existing.map(e => String(e[firstField]).toLowerCase()));
 
-      if (emails.length > 0) {
-        const existing = await Person.find({ email: { $in: emails } }).lean();
-        const existingSet = new Set(existing.map(e => e.email.toLowerCase()));
-
-        const newRows = validRows.filter(row => {
-          const email = row.email || Object.values(row).find(v => typeof v === 'string' && v.includes('@'));
-          if (!email) return true;
-          const norm = String(email).trim().toLowerCase();
-          if (existingSet.has(norm)) {
-            skipped++;
-            return false;
-          }
-          return true;
-        });
-
-        if (newRows.length > 0) {
-          await Person.insertMany(newRows);
-          added = newRows.length;
+      const newRows = rows.filter(row => {
+        const key = row[firstField] ? String(row[firstField]).trim().toLowerCase() : null;
+        if (key && existingKeys.has(key)) {
+          skipped++;
+          duplicateFound = true;
+          return false;
         }
-      } else {
-        await Person.insertMany(validRows);
-        added = validRows.length;
+        return true;
+      });
+
+      if (newRows.length > 0) {
+        await Person.insertMany(newRows);
+        added = newRows.length;
       }
+    } else {
+      await Person.insertMany(rows);
+      added = rows.length;
     }
 
     return NextResponse.json({
-      success: true,
       added,
       skipped,
-      fileUrl: isDev ? null : fileUrl,
-      message: added > 0
-        ? `${added} rows imported!`
-        : 'No new data (all duplicates or empty)'
+      message: duplicateFound ? 'Some rows skipped (duplicates)' : 'Upload successful'
     });
 
   } catch (error) {
-    console.error('Upload failed:', error);
-    return NextResponse.json(
-      { error: 'Upload failed', details: error.message },
-      { status: 500 }
-    );
+    console.error('Dynamic upload error:', error);
+    return NextResponse.json({ error: 'Upload failed: ' + error.message }, { status: 500 });
   }
 }
