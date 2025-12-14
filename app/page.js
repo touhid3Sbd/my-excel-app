@@ -127,16 +127,20 @@ export default function Home() {
         body: JSON.stringify(newRow)
       });
 
+      const result = await res.json();
+
       if (res.ok) {
         setShowAdd(false);
         setNewRow({});
-        load(); // This forces table refresh
+        load(); // Refresh table to show new row
+        alert('Row added successfully!');
       } else {
-        const error = await res.text();
-        alert('Failed: ' + error);
+        alert('Failed to add row: ' + (result.error || 'Unknown error'));
+        console.error('Add row error:', result);
       }
-    } catch (err) {
-      alert('Error: ' + err.message);
+    } catch (error) {
+      alert('Network error: ' + error.message);
+      console.error('Add row network error:', error);
     }
   }
 
@@ -148,8 +152,20 @@ export default function Home() {
 
   async function remove(id) {
     if (confirm('Delete this row?')) {
-      await fetch(`/api/people/${id}`, { method: 'DELETE' });
-      load();
+      try {
+        const res = await fetch(`/api/people/${id}`, {
+          method: 'DELETE'
+        });
+        if (res.ok) {
+          load(); // Refresh table
+        } else {
+          const error = await res.text();
+          alert('Failed to delete: ' + error);
+        }
+      } catch (error) {
+        alert('Network error: ' + error.message);
+        console.error('Delete error:', error);
+      }
     }
   }
 
@@ -189,7 +205,7 @@ export default function Home() {
           <h1 className="text-4xl font-bold text-gray-800">Excel Data Manager</h1>
         </div>
 
-        
+
         {/* Upload Section — BUTTONS SAME SIZE AS CONTROLS */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -382,13 +398,34 @@ export default function Home() {
                         {row[col] != null ? String(row[col]) : '-'}
                       </td>
                     ))}
-                    <td className="px-6 py-4 text-center space-x-3">
-                      <button onClick={() => { setEditing(row); setEditForm({ ...row }); }} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded font-medium">
-                        Edit
-                      </button>
-                      <button onClick={() => remove(row._id)} className="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded font-medium">
-                        Delete
-                      </button>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex justify-center gap-4">
+                        {/* Edit Icon */}
+                        <button
+                          onClick={() => { setEditing(row); setEditForm({ ...row }); }}
+                          className="text-blue-600 hover:text-blue-800 transition"
+                          title="Edit"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+
+                        {/* Delete Icon */}
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            remove(row._id);
+                          }}
+                          className="text-red-600 hover:text-red-800 transition"
+                          title="Delete"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
