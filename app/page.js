@@ -41,34 +41,34 @@ export default function Home() {
   }, [search, column]);
 
   async function load() {
-  setLoading(true);
-  const params = new URLSearchParams();
-  params.set('page', page);
-  params.set('limit', 15);
-  if (search.trim()) {
-    params.set('search', search.trim());
-    if (column) {
-      params.set('column', column);
-    } else {
-      params.set('all', 'true'); // ← NEW: Tell API to search all columns
+    setLoading(true);
+    const params = new URLSearchParams();
+    params.set('page', page);
+    params.set('limit', 15);
+    if (search.trim()) {
+      params.set('search', search.trim());
+      if (column) {
+        params.set('column', column);
+      } else {
+        params.set('all', 'true'); // ← NEW: Tell API to search all columns
+      }
+    }
+
+    try {
+      const res = await fetch(`/api/people?${params}`);
+      if (!res.ok) throw new Error('Failed to fetch');
+      const result = await res.json();
+      setData(result.data || []);
+      setTotal(result.total || 0);
+      setTotalPages(result.totalPages || 1);
+      setSelectedRows(new Set());
+    } catch (error) {
+      console.error('Load error:', error);
+      alert('Failed to load data');
+    } finally {
+      setLoading(false);
     }
   }
-
-  try {
-    const res = await fetch(`/api/people?${params}`);
-    if (!res.ok) throw new Error('Failed to fetch');
-    const result = await res.json();
-    setData(result.data || []);
-    setTotal(result.total || 0);
-    setTotalPages(result.totalPages || 1);
-    setSelectedRows(new Set());
-  } catch (error) {
-    console.error('Load error:', error);
-    alert('Failed to load data');
-  } finally {
-    setLoading(false);
-  }
-}
 
   useEffect(() => {
     load();
@@ -231,7 +231,7 @@ export default function Home() {
           {uploadStatus === 'success' && (
             <div className="mt-4 p-4 bg-green-100 border border-green-300 rounded-lg text-center">
               <p className="text-green-800 font-bold text-lg">
-                Upload Successful! Added: <span className="text-2xl">{uploadResult.added}</span> | 
+                Upload Successful! Added: <span className="text-2xl">{uploadResult.added}</span> |
                 Skipped: <span className="text-2xl">{uploadResult.skipped}</span>
               </p>
             </div>
@@ -239,7 +239,7 @@ export default function Home() {
           {uploadStatus === 'duplicate' && (
             <div className="mt-4 p-4 bg-yellow-100 border border-yellow-300 rounded-lg text-center">
               <p className="text-yellow-800 font-bold text-lg">
-                Duplicate data found! Added: <span className="text-2xl">{uploadResult.added}</span> | 
+                Duplicate data found! Added: <span className="text-2xl">{uploadResult.added}</span> |
                 Skipped: <span className="text-2xl">{uploadResult.skipped}</span>
               </p>
             </div>
@@ -351,8 +351,8 @@ export default function Home() {
 
         {/* Records Info */}
         <div className="mb-6 text-gray-700 font-medium">
-          Total: <span className="text-green-700 font-bold">{total}</span> | 
-          Showing {(page-1)*15 + 1}–{Math.min(page*15, total)} of {total}
+          Total: <span className="text-green-700 font-bold">{total}</span> |
+          Showing {(page - 1) * 15 + 1}–{Math.min(page * 15, total)} of {total}
         </div>
 
         {/* Table */}
@@ -364,7 +364,7 @@ export default function Home() {
                   <th className="px-6 py-4 text-center">
                     <input type="checkbox" checked={selectedRows.size === data.length && data.length > 0} onChange={toggleAll} className="w-5 h-5 rounded" />
                   </th>
-                  {data[0] && Object.keys(data[0]).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
+                  {data[0] && Object.keys(data[0]).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
                     <th key={col} className="px-6 py-4 text-left font-semibold text-gray-700 capitalize">
                       {col.replace(/([A-Z])/g, ' $1').trim()}
                     </th>
@@ -378,7 +378,7 @@ export default function Home() {
                     <td className="px-6 py-4 text-center">
                       <input type="checkbox" checked={selectedRows.has(row._id)} onChange={() => toggleRow(row._id)} className="w-5 h-5 rounded" />
                     </td>
-                    {Object.keys(row).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
+                    {Object.keys(row).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
                       <td key={col} className="px-6 py-4 text-gray-800">
                         {row[col] != null ? String(row[col]) : '-'}
                       </td>
