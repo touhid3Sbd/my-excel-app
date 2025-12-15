@@ -1,4 +1,4 @@
-// app/page.js → FINAL: FULL UPDATED CODE WITH ALL FIXES
+// app/page.js → FINAL: FULLY DYNAMIC COLUMN FILTER (NO HARDCODING)
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -8,10 +8,8 @@ export default function Home() {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
-  const [pageInput, setPageInput] = useState(page);
   const [search, setSearch] = useState('');
-  const [minAge, setMinAge] = useState('');
-  const [maxAge, setMaxAge] = useState('');
+  const [column, setColumn] = useState(''); // Selected column for search
   const [file, setFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
   const [uploadResult, setUploadResult] = useState({ added: 0, skipped: 0 });
@@ -21,63 +19,60 @@ export default function Home() {
   const [editForm, setEditForm] = useState({});
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [exporting, setExporting] = useState(false);
-  const [loading, setLoading] = useState(false); // Added for loading spinner
+  const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Dynamic columns from data (updated after upload/load)
+  const [columns, setColumns] = useState([]);
 
-  // DYNAMIC FIELDS — for Add/Edit modal
-  const [dynamicFields, setDynamicFields] = useState([]);
-
+  // Update columns when data changes
   useEffect(() => {
     if (data.length > 0) {
-      const fields = Object.keys(data[0]).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k));
-      setDynamicFields(fields);
+      const cols = Object.keys(data[0]).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k));
+      setColumns(cols);
     } else {
-      setDynamicFields([]); // empty if no data
+      setColumns([]);
     }
   }, [data]);
 
+  // Reset page when search changes
+  useEffect(() => {
+    setPage(1);
+  }, [search, column]);
+
   async function load() {
-    setLoading(true);
-    const params = new URLSearchParams();
-    params.set('page', page);
-    if (search.trim()) params.set('search', search.trim());
-
-    try {
-      const res = await fetch(`/api/people?${params}`);
-      if (!res.ok) throw new Error('Failed to fetch');
-      const result = await res.json();
-
-      setData(result.data || []);
-      setTotal(result.total || 0);
-      setTotalPages(result.totalPages || 1);
-      setSelectedRows(new Set());
-    } catch (error) {
-      console.error('Load error:', error);
-      alert('Failed to load data');
-    } finally {
-      setLoading(false);
+  setLoading(true);
+  const params = new URLSearchParams();
+  params.set('page', page);
+  params.set('limit', 15);
+  if (search.trim()) {
+    params.set('search', search.trim());
+    if (column) {
+      params.set('column', column);
+    } else {
+      params.set('all', 'true'); // ← NEW: Tell API to search all columns
     }
   }
 
+  try {
+    const res = await fetch(`/api/people?${params}`);
+    if (!res.ok) throw new Error('Failed to fetch');
+    const result = await res.json();
+    setData(result.data || []);
+    setTotal(result.total || 0);
+    setTotalPages(result.totalPages || 1);
+    setSelectedRows(new Set());
+  } catch (error) {
+    console.error('Load error:', error);
+    alert('Failed to load data');
+  } finally {
+    setLoading(false);
+  }
+}
+
   useEffect(() => {
     load();
-  }, [page, search, minAge, maxAge]);
-
-  useEffect(() => {
-    setPageInput(page);
-  }, [page]);
-
-  const handlePageJump = (e) => {
-    if (e.key === 'Enter') {
-      const newPage = parseInt(pageInput, 10);
-      if (newPage >= 1 && newPage <= totalPages) {
-        setPage(newPage);
-      } else {
-        setPageInput(page);
-      }
-    }
-  };
+  }, [page, search, column]);
 
   async function uploadFile() {
     if (!file) return alert('Please select a file');
@@ -91,15 +86,9 @@ export default function Home() {
     if (res.ok) {
       const json = await res.json();
       setUploadResult({ added: json.added || 0, skipped: json.skipped || 0 });
-
-      if (json.message === 'Duplicate data found') {
-        setUploadStatus('duplicate');
-      } else {
-        setUploadStatus('success');
-      }
-
+      setUploadStatus(json.message === 'Duplicate data found' ? 'duplicate' : 'success');
       setFile(null);
-      load();
+      load(); // Reload to show new columns/data
     } else {
       setUploadStatus('error');
     }
@@ -127,44 +116,44 @@ export default function Home() {
         body: JSON.stringify(newRow)
       });
 
-      const result = await res.json();
-
       if (res.ok) {
         setShowAdd(false);
         setNewRow({});
-        load(); // Refresh table to show new row
-        alert('Row added successfully!');
+        load();
       } else {
-        alert('Failed to add row: ' + (result.error || 'Unknown error'));
-        console.error('Add row error:', result);
+        alert('Failed to add row');
       }
     } catch (error) {
-      alert('Network error: ' + error.message);
-      console.error('Add row network error:', error);
+      alert('Error: ' + error.message);
     }
   }
 
   async function saveEdit() {
-    await fetch(`/api/people/${editing._id}`, { method: 'PUT', body: JSON.stringify(editForm), headers: { 'Content-Type': 'application/json' } });
-    setEditing(null);
-    load();
+    try {
+      const res = await fetch(`/api/people/${editing._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm)
+      });
+
+      if (res.ok) {
+        setEditing(null);
+        load();
+      } else {
+        alert('Failed to save edit');
+      }
+    } catch (error) {
+      alert('Error: ' + error.message);
+    }
   }
 
   async function remove(id) {
     if (confirm('Delete this row?')) {
       try {
-        const res = await fetch(`/api/people/${id}`, {
-          method: 'DELETE'
-        });
-        if (res.ok) {
-          load(); // Refresh table
-        } else {
-          const error = await res.text();
-          alert('Failed to delete: ' + error);
-        }
+        const res = await fetch(`/api/people/${id}`, { method: 'DELETE' });
+        if (res.ok) load();
       } catch (error) {
-        alert('Network error: ' + error.message);
-        console.error('Delete error:', error);
+        alert('Failed to delete');
       }
     }
   }
@@ -173,14 +162,19 @@ export default function Home() {
     if (selectedRows.size === 0) return alert('No rows selected');
     if (!confirm(`Delete ${selectedRows.size} rows permanently?`)) return;
 
-    await fetch('/api/people/bulk-delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: Array.from(selectedRows) })
-    });
-
-    setSelectedRows(new Set());
-    load();
+    try {
+      const res = await fetch('/api/people/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedRows) })
+      });
+      if (res.ok) {
+        setSelectedRows(new Set());
+        load();
+      }
+    } catch (error) {
+      alert('Failed to delete selected');
+    }
   }
 
   const toggleRow = (id) => {
@@ -205,8 +199,7 @@ export default function Home() {
           <h1 className="text-4xl font-bold text-gray-800">Excel Data Manager</h1>
         </div>
 
-
-        {/* Upload Section — BUTTONS SAME SIZE AS CONTROLS */}
+        {/* Upload Section */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div
@@ -223,95 +216,71 @@ export default function Home() {
               </span>
               <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
             </div>
-            <div className="flex gap-4">
-              <button
-                onClick={downloadTemplate}
-                className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 transition"
-              >
+            <div className="flex gap-3">
+              <button onClick={downloadTemplate} className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium text-sm">
                 Template
               </button>
-              <button
-                onClick={uploadFile}
-                disabled={!file || uploadStatus === 'uploading'}
-                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 transition"
-              >
+              <button onClick={uploadFile} disabled={!file || uploadStatus === 'uploading'}
+                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium text-sm">
                 {uploadStatus === 'uploading' ? 'Uploading...' : 'Upload'}
               </button>
             </div>
           </div>
 
-          {/* MESSAGES */}
+          {/* Messages */}
           {uploadStatus === 'success' && (
             <div className="mt-4 p-4 bg-green-100 border border-green-300 rounded-lg text-center">
               <p className="text-green-800 font-bold text-lg">
-                Upload Successful! Added: <span className="text-2xl">{uploadResult.added}</span> |
+                Upload Successful! Added: <span className="text-2xl">{uploadResult.added}</span> | 
                 Skipped: <span className="text-2xl">{uploadResult.skipped}</span>
               </p>
             </div>
           )}
-
           {uploadStatus === 'duplicate' && (
             <div className="mt-4 p-4 bg-yellow-100 border border-yellow-300 rounded-lg text-center">
               <p className="text-yellow-800 font-bold text-lg">
-                Duplicate data found! Added: <span className="text-2xl">{uploadResult.added}</span> |
+                Duplicate data found! Added: <span className="text-2xl">{uploadResult.added}</span> | 
                 Skipped: <span className="text-2xl">{uploadResult.skipped}</span>
               </p>
             </div>
           )}
-
           {uploadStatus === 'error' && (
             <p className="mt-4 text-red-600 text-center font-bold">Upload Failed!</p>
           )}
         </div>
 
-        {/* Controls — ALL BUTTONS SAME SIZE */}
-        <div className="flex flex-wrap gap-4 mb-8 items-center">
-          {/* Add New Row */}
-          <button
-            onClick={() => {
-              setShowAdd(true);
-              const emptyRow = {};
-              dynamicFields.forEach(field => {
-                emptyRow[field] = '';
-              });
-              setNewRow(emptyRow);
-            }}
-            className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 transition"
-          >
-            + Add New Row
+        {/* Controls */}
+        <div className="flex flex-wrap gap-6 mb-8 items-end">
+          <button onClick={() => {
+            setShowAdd(true);
+            const emptyRow = {};
+            columns.forEach(col => emptyRow[col] = '');
+            setNewRow(emptyRow);
+          }} className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold">
+            + Add Row
           </button>
 
-          {/* Delete Selected */}
-          <button
-            onClick={deleteSelected}
-            disabled={selectedRows.size === 0}
-            className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 transition"
-            title={`Delete ${selectedRows.size} selected rows`}
-          >
+          <button onClick={deleteSelected} disabled={selectedRows.size === 0}
+            className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white px-6 py-3 rounded-lg font-medium">
             Delete ({selectedRows.size})
           </button>
 
-          {/* Delete All */}
           <button
             onClick={async () => {
               if (!confirm(`Delete ALL ${total} records permanently?`)) return;
               await fetch('/api/people/clear-all', { method: 'POST' });
               load();
             }}
-            className="bg-red-700 hover:bg-red-800 text-white px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 transition"
-            title="Delete every record"
-          >
-            All ({total})
+            className="bg-red-700 hover:bg-red-800 text-white px-6 py-3 rounded-lg font-medium">
+            Delete All ({total})
           </button>
 
-          {/* Export */}
           <button
             onClick={async () => {
               setExporting(true);
               const params = new URLSearchParams();
               if (search) params.set('search', search);
-              if (minAge) params.set('minAge', minAge);
-              if (maxAge) params.set('maxAge', maxAge);
+              if (column) params.set('column', column);
               params.set('export', 'true');
 
               const res = await fetch(`/api/people?${params}`);
@@ -350,24 +319,40 @@ export default function Home() {
               setExporting(false);
             }}
             disabled={exporting}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 transition"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2"
           >
-            {exporting ? 'Exporting...' : 'Export'}
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            {exporting ? 'Exporting...' : 'Export Excel'}
           </button>
 
-          {/* Search */}
+          {/* DYNAMIC COLUMN FILTER + SEARCH */}
+          <select
+            value={column}
+            onChange={e => setColumn(e.target.value)}
+            className="px-6 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
+          >
+            <option value="">All Columns</option>
+            {columns.map(col => (
+              <option key={col} value={col}>
+                {col.replace(/([A-Z])/g, ' $1').trim()}
+              </option>
+            ))}
+          </select>
+
           <input
             placeholder="Search..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="flex-1 min-w-64 px-5 py-2.5 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none text-sm"
+            className="flex-1 min-w-64 px-6 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
           />
         </div>
 
         {/* Records Info */}
         <div className="mb-6 text-gray-700 font-medium">
-          Total: <span className="text-green-700 font-bold">{total}</span> |
-          Showing {(page - 1) * 15 + 1}–{Math.min(page * 15, total)} of {total}
+          Total: <span className="text-green-700 font-bold">{total}</span> | 
+          Showing {(page-1)*15 + 1}–{Math.min(page*15, total)} of {total}
         </div>
 
         {/* Table */}
@@ -379,7 +364,7 @@ export default function Home() {
                   <th className="px-6 py-4 text-center">
                     <input type="checkbox" checked={selectedRows.size === data.length && data.length > 0} onChange={toggleAll} className="w-5 h-5 rounded" />
                   </th>
-                  {data[0] && Object.keys(data[0]).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
+                  {data[0] && Object.keys(data[0]).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
                     <th key={col} className="px-6 py-4 text-left font-semibold text-gray-700 capitalize">
                       {col.replace(/([A-Z])/g, ' $1').trim()}
                     </th>
@@ -393,12 +378,12 @@ export default function Home() {
                     <td className="px-6 py-4 text-center">
                       <input type="checkbox" checked={selectedRows.has(row._id)} onChange={() => toggleRow(row._id)} className="w-5 h-5 rounded" />
                     </td>
-                    {Object.keys(row).filter(k => !['__v', 'createdAt', 'updatedAt', '_id'].includes(k)).map(col => (
+                    {Object.keys(row).filter(k => !['__v','createdAt','updatedAt','_id'].includes(k)).map(col => (
                       <td key={col} className="px-6 py-4 text-gray-800">
                         {row[col] != null ? String(row[col]) : '-'}
                       </td>
                     ))}
-                    <td className="px-6 py-4 text-center">
+                    <td className="px-6 py-4 text-center space-x-3">
                       <div className="flex justify-center gap-4">
                         {/* Edit Icon */}
                         <button
@@ -457,46 +442,31 @@ export default function Home() {
                 {showAdd ? 'Add New Row' : 'Edit Row'}
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {dynamicFields.map(col => (
+                {columns.map(col => (
                   <div key={col}>
                     <label className="block font-medium text-gray-700 capitalize mb-2">
-                      {col.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').trim()}
+                      {col.replace(/([A-Z])/g, ' $1').trim()}
                     </label>
                     <input
                       value={(showAdd ? newRow : editForm)[col] || ''}
-                      onChange={e => {
-                        const value = e.target.value;
-                        if (showAdd) {
-                          setNewRow(prev => ({ ...prev, [col]: value }));
-                        } else {
-                          setEditForm(prev => ({ ...prev, [col]: value }));
-                        }
-                      }}
+                      onChange={e => showAdd ? setNewRow({ ...newRow, [col]: e.target.value }) : setEditForm({ ...editForm, [col]: e.target.value })}
                       onKeyDown={e => e.key === 'Enter' && (showAdd ? addRow() : saveEdit())}
                       className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none"
-                      placeholder={col.replace(/_/g, ' ')}
                     />
                   </div>
                 ))}
               </div>
               <div className="flex gap-6 mt-10">
-                <button
-                  onClick={showAdd ? addRow : saveEdit}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-4 rounded-lg font-bold text-lg"
-                >
-                  {showAdd ? 'Add Row' : 'Save Changes'}
+                <button onClick={showAdd ? addRow : saveEdit} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-4 rounded-lg font-bold text-lg">
+                  {showAdd ? 'Add Row' : 'Save'}
                 </button>
-                <button
-                  onClick={() => { setShowAdd(false); setEditing(null); }}
-                  className="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-4 rounded-lg font-bold text-lg"
-                >
+                <button onClick={() => { setShowAdd(false); setEditing(null); }} className="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-4 rounded-lg font-bold text-lg">
                   Cancel
                 </button>
               </div>
             </div>
           </div>
         )}
-
       </div>
     </div>
   );
