@@ -74,6 +74,16 @@ export default function Home() {
     load();
   }, [page, search, column]);
 
+  // Reset page when search text or column changes
+  useEffect(() => {
+    setPage(1);
+  }, [search, column]);
+
+  // Load data when page, search, or column changes
+  useEffect(() => {
+    load();
+  }, [page, search, column]); // ← Removed other dependencies if any
+
   async function uploadFile() {
     if (!file) return alert('Please select a file');
     setUploadStatus('uploading');
